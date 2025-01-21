@@ -184,15 +184,6 @@ Nous accueillons toute proposition d’amélioration ou de correction. Pour cont
    ```
 5. Ouvrez une **Pull Request** pour examen.
 
----
-
-## Licence
-Ce projet est sous licence MIT. Consultez le fichier [LICENSE](./LICENSE) pour plus de détails.
-
----
-
-## Remerciements
-Un grand merci à la communauté Open Source pour la mise à disposition d’outils et d’exemples de projets. Merci également à tous les testeurs qui ont contribué en fournissant des retours et des suggestions pour faire évoluer cette application.
 
 ---
 
