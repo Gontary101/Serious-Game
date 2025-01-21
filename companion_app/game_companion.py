@@ -422,6 +422,7 @@ class CompanionApp(tk.Tk):
         return technologies
 
     def create_widgets(self):
+        # Player Selection Frame
         player_frame = ttk.Frame(self)
         player_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
 
@@ -435,6 +436,7 @@ class CompanionApp(tk.Tk):
 
         ttk.Button(player_frame, text="Add Player", command=self.add_player_dialog).pack(side=tk.LEFT, padx=5)
 
+        # Notebook for Tabs
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(expand=1, fill='both', padx=10, pady=10)
 
@@ -488,6 +490,7 @@ class CompanionApp(tk.Tk):
                 self.game_state.add_player(name)
                 self.player_dropdown['values'] = [player.name for player in self.game_state.players]
                 add_window.destroy()
+                messagebox.showinfo("Success", f"Player '{name}' added successfully.")
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
@@ -774,7 +777,7 @@ class CompanionApp(tk.Tk):
         }
         for factory in self.selected_player.factories:
             for res, qty in factory.output.items():
-                if res in resource_summary:
+                if res != "Consultancy Services":  # Consultancy Services are treated as EC
                     resource_summary[res]['Produced'] += qty
             for res, qty in factory.resource_requirements.items():
                 if res in resource_summary:
@@ -796,11 +799,25 @@ class CompanionApp(tk.Tk):
         carbon_tax = 5 * total_pollution
         total_salary = sum(worker.salary for worker in self.selected_player.workers)
         total_maintenance = sum(tech.maintenance for tech in self.selected_player.technologies)
+        transportation_cost = 0
+        for factory in self.selected_player.factories:
+            for trans in factory.transportation.values():
+                trans_type = trans['type']
+                distance = trans['distance']
+                transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
+                if transport_info:
+                    cost = transport_info['cost_per_distance'] * distance
+                    for tech in self.selected_player.technologies:
+                        if "Reduce Fossil Fuel transportation costs by 10 EC per distance unit." in tech.effect and trans_type == "Fossil Fuel":
+                            cost = max(cost - 10 * distance, 0)
+                    transportation_cost += cost
+
         info = (
             f"Total Pollution Points (PP): {total_pollution}\n"
             f"Carbon Tax (5 EC × PP): {carbon_tax} EC\n"
             f"Total Worker Salaries: {total_salary} EC\n"
-            f"Total Technology Maintenance: {total_maintenance} EC"
+            f"Total Technology Maintenance: {total_maintenance} EC\n"
+            f"Total Transportation Cost: {transportation_cost} EC"
         )
         self.pollution_info.config(text=info)
 
@@ -835,17 +852,35 @@ class CompanionApp(tk.Tk):
                                 cost = max(cost - 10 * distance, 0)
                         transportation_cost += cost
 
-            # Direct factory EC
+            # Resource-based revenue and resource production:
+            # First, handle direct factory EC output
             factory_direct_ec = sum(f.ec_output for f in player.factories)
 
-            # Resource-based revenue
             production_revenue = 0
+            # Now factories consume required resources and produce outputs
             for factory in player.factories:
-                for res, qty in factory.output.items():
-                    if res == "Consultancy Services":
-                        production_revenue += qty
-                    else:
-                        production_revenue += qty * 50
+                # Check if we have enough resources to run this factory
+                can_produce = True
+                for r_need, q_need in factory.resource_requirements.items():
+                    if player.resources.get(r_need, 0) < q_need:
+                        can_produce = False
+                        break
+
+                if can_produce:
+                    # Subtract the required resources
+                    for r_need, q_need in factory.resource_requirements.items():
+                        player.resources[r_need] -= q_need
+
+                    # Produce the factory's outputs
+                    for r_out, q_out in factory.output.items():
+                        if r_out == "Consultancy Services":
+                            # Consultancy Services count as direct EC
+                            production_revenue += q_out
+                        else:
+                            # Add produced resource to player's inventory
+                            player.resources[r_out] += q_out
+                            # Also add revenue for these produced goods
+                            production_revenue += q_out * 50
 
             total_production_revenue = factory_direct_ec + production_revenue
 
@@ -900,6 +935,7 @@ class CompanionApp(tk.Tk):
                 transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
                 if transport_info:
                     pollution = transport_info['pollution_per_distance'] * distance
+                    # Apply technology effects
                     for tech in player.technologies:
                         if "Reduce transportation pollution by 50%" in tech.effect and trans_type == "Electric":
                             pollution = pollution // 2
@@ -909,9 +945,9 @@ class CompanionApp(tk.Tk):
         for tech in player.technologies:
             if "pollution" in tech.effect.lower():
                 import re
-                reductions = map(int, re.findall(r'-\\d+', tech.effect))
+                reductions = map(int, re.findall(r'-\d+', tech.effect))
                 for reduction in reductions:
-                    total_pollution += reduction
+                    total_pollution += reduction  # reduction is negative
 
         # Worker-based pollution reductions
         for worker in player.workers:
@@ -940,7 +976,7 @@ class CompanionApp(tk.Tk):
         worker_dropdown.current(0)
         worker_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
 
-        worker_details = tk.Text(add_window, width=40, height=5, wrap='word')
+        worker_details = tk.Text(add_window, width=40, height=5, wrap='word', state='disabled')
         worker_details.grid(row=1, column=0, columnspan=2, padx=10, pady=5)
 
         def display_worker_details(event):
@@ -957,10 +993,13 @@ class CompanionApp(tk.Tk):
                     f"Salary: {info[role]['salary']} EC/round\n"
                     f"Benefit: {info[role]['benefit']}"
                 )
+                worker_details.config(state='normal')
                 worker_details.delete(1.0, tk.END)
                 worker_details.insert(tk.END, details)
+                worker_details.config(state='disabled')
 
         worker_dropdown.bind("<<ComboboxSelected>>", display_worker_details)
+        display_worker_details(None)  # Display details for the default selection
 
         def hire_worker():
             role = worker_role_var.get()
@@ -1068,6 +1107,7 @@ class CompanionApp(tk.Tk):
             self.selected_player.workers.remove(worker_obj)
             self.refresh_workers()
             self.refresh_factories()
+            self.refresh_dashboard()
             messagebox.showinfo("Success", f"{worker_role} removed successfully.")
 
     # ---------------------- Technology Management ----------------------
@@ -1089,7 +1129,7 @@ class CompanionApp(tk.Tk):
         tech_dropdown['values'] = tech_names
         tech_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
 
-        tech_details = tk.Text(add_window, width=60, height=15, wrap='word')
+        tech_details = tk.Text(add_window, width=60, height=15, wrap='word', state='disabled')
         tech_details.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
 
         def display_tech_details(event):
@@ -1104,10 +1144,13 @@ class CompanionApp(tk.Tk):
                     f"Effect: {tech_obj.effect}\n"
                     f"Prerequisites: {', '.join(tech_obj.prerequisites) if tech_obj.prerequisites else 'None'}"
                 )
+                tech_details.config(state='normal')
                 tech_details.delete(1.0, tk.END)
                 tech_details.insert(tk.END, details)
+                tech_details.config(state='disabled')
 
         tech_dropdown.bind("<<ComboboxSelected>>", display_tech_details)
+        display_tech_details(None)  # Display details for the default selection
 
         def purchase_technology():
             name = tech_type_var.get()
@@ -1128,6 +1171,11 @@ class CompanionApp(tk.Tk):
                 if not (has_worker or has_tech):
                     messagebox.showerror("Error", f"Prerequisite '{prereq}' not met.")
                     return
+
+            # Check if technology is already purchased
+            if any(t.name == tech_obj.name for t in self.selected_player.technologies):
+                messagebox.showerror("Error", "Technology already purchased.")
+                return
 
             self.selected_player.ec -= tech_obj.cost
             self.selected_player.technologies.append(tech_obj)
@@ -1362,8 +1410,8 @@ class CompanionApp(tk.Tk):
 
         def update_transportation_fields(event):
             factory_type = factory_type_var.get()
-            for frame in transportation_frames:
-                frame.destroy()
+            for trans_dropdown in transportation_frames:
+                trans_dropdown.destroy()
             transportation_frames.clear()
             f_obj = next((f for f in self.factories_list if f.name == factory_type), None)
             if f_obj and f_obj.transportation_needed:
@@ -1379,6 +1427,7 @@ class CompanionApp(tk.Tk):
                     transportation_frames.append(trans_dropdown)
 
         factory_dropdown.bind("<<ComboboxSelected>>", update_transportation_fields)
+        update_transportation_fields(None)  # Initialize transportation fields for default selection
 
         def add_factory():
             fac_name = factory_type_var.get()
@@ -1391,7 +1440,11 @@ class CompanionApp(tk.Tk):
                 messagebox.showerror("Error", "Invalid factory type selected.")
                 return
 
-            tid = int(terrain_selection.split('.')[0]) - 1
+            try:
+                tid = int(terrain_selection.split('.')[0]) - 1
+            except (IndexError, ValueError):
+                messagebox.showerror("Error", "Invalid terrain selection.")
+                return
             terrain_tile = self.game_state.terrain_tiles[tid]
             if terrain_tile.terrain_type not in f_obj.allowed_terrain:
                 messagebox.showerror("Error", f"{f_obj.name} cannot be placed on {terrain_tile.terrain_type} terrain.")
@@ -1446,13 +1499,15 @@ class CompanionApp(tk.Tk):
                         return
                     new_factory.transportation[r] = {"type": trans_type, "distance": dist}
 
-            # ------------------ Worker Requirement Warning (Restored) ------------------
-            # Check if we have enough workers for each required role. If not, warn.
-            # We'll still allow factory creation, but notify the user.
+            # ------------------ Worker Requirement Warning ------------------
             for role, count_needed in new_factory.workers_required.items():
                 available_workers = [w for w in self.selected_player.workers if w.role == role]
                 if len(available_workers) < count_needed:
-                    messagebox.showwarning("Warning", f"Not enough {role}(s) for {new_factory.name} (need {count_needed}, have {len(available_workers)}).")
+                    messagebox.showwarning(
+                        "Warning",
+                        f"Not enough {role}(s) for {new_factory.name} "
+                        f"(need {count_needed}, have {len(available_workers)})."
+                    )
 
             # Attempt to auto-assign as many as possible
             for role, count_needed in new_factory.workers_required.items():
@@ -1501,13 +1556,19 @@ class CompanionApp(tk.Tk):
         factory_name = self.factory_tree.item(selected_item, 'values')[0]
         factory_obj = next((f for f in self.selected_player.factories if f.name == factory_name), None)
         if factory_obj:
-            # Optional partial refunds
+            # Optional partial refund
             self.selected_player.ec += factory_obj.construction_cost
+            # Also return produced resources to the player's stock if you want,
+            # but this is optional. Typically removing a factory doesn't
+            # retroactively remove its outputs from the game.
             for res, qty in factory_obj.output.items():
-                self.selected_player.resources[res] += qty
+                if res != "Consultancy Services":
+                    self.selected_player.resources[res] += qty
+
             self.selected_player.factories.remove(factory_obj)
             self.refresh_factories()
             self.refresh_resources()
+            self.refresh_dashboard()
             messagebox.showinfo("Success", f"{factory_obj.name} removed successfully.")
 
     def buy_resources_from_bank(self, required_resources: Dict[str, int]) -> bool:
