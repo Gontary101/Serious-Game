@@ -381,6 +381,9 @@ class CompanionApp(tk.Tk):
         self.game_state = game_state
         self.selected_player: Optional[Player] = None
 
+        # ---------- NEW: Store round history logs ----------
+        self.history_log: List[str] = []
+
         # Load predefined data
         self.factories_list = self.load_factories()
         self.technologies_list = self.load_technologies()
@@ -474,6 +477,11 @@ class CompanionApp(tk.Tk):
         self.pollution_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.pollution_tab, text='Pollution & Costs')
         self.create_pollution_tab()
+
+        # ---------- NEW: History Tab ----------
+        self.history_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_tab, text='History')
+        self.create_history_tab()
 
     # ---------------------- Player Management ----------------------
 
@@ -668,6 +676,26 @@ class CompanionApp(tk.Tk):
 
         ttk.Button(frame, text="Calculate Round", command=self.calculate_round).pack(pady=10)
 
+    # ---------- NEW: Create History Tab ----------
+    def create_history_tab(self):
+        frame = ttk.Frame(self.history_tab)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.history_text = tk.Text(frame, wrap="word", state="normal", height=30)
+        self.history_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.history_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.history_text.configure(yscrollcommand=scrollbar.set)
+
+    def refresh_history(self):
+        # Display the stored round summaries (or logs) in the text widget
+        self.history_text.config(state="normal")
+        self.history_text.delete("1.0", tk.END)
+        for entry in self.history_log:
+            self.history_text.insert(tk.END, entry + "\n\n")
+        self.history_text.config(state="disabled")
+
     # ---------------------- Refresh Methods ----------------------
 
     def refresh_tabs(self):
@@ -678,6 +706,7 @@ class CompanionApp(tk.Tk):
         self.refresh_workers()
         self.refresh_resources()
         self.refresh_pollution()
+        self.refresh_history()
 
     def refresh_dashboard(self):
         if not self.selected_player:
@@ -922,6 +951,10 @@ class CompanionApp(tk.Tk):
             self.game_state.current_round += 1
             if self.game_state.current_round > self.game_state.max_rounds:
                 self.end_game()
+
+        # ---------- NEW: Store the round summary in history and refresh ----------
+        self.history_log.append(round_summary)
+        self.refresh_history()
 
         messagebox.showinfo("Round Calculated", round_summary)
 
@@ -1404,18 +1437,45 @@ class CompanionApp(tk.Tk):
         terrain_dropdown['values'] = owned_tiles
         terrain_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
 
-        ttk.Label(add_window, text="Select Transportation Type for Each Resource Needed:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        # ---------- NEW: Text to display factory characteristics ----------
+        factory_details = tk.Text(add_window, width=60, height=10, wrap='word', state='disabled')
+        factory_details.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
-        transportation_frames = []
+        def display_factory_characteristics(f_obj):
+            if not f_obj:
+                return
+            details_str = (
+                f"Name: {f_obj.name}\n"
+                f"Construction Cost: {f_obj.construction_cost}\n"
+                f"Operational Cost: {f_obj.operational_cost}\n"
+                f"Pollution: {f_obj.pollution}\n"
+                f"Output: {', '.join(f'{k}:{v}' for k,v in f_obj.output.items())}\n"
+                f"Resource Requirements: "
+                f"{', '.join(f'{k}:{v}' for k,v in f_obj.resource_requirements.items()) if f_obj.resource_requirements else 'None'}\n"
+                f"Allowed Terrain: {', '.join(f_obj.allowed_terrain)}\n"
+                f"Workers Required: {', '.join(f'{k}:{v}' for k,v in f_obj.workers_required.items())}\n"
+                f"Transportation Needed: "
+                f"{', '.join(f_obj.transportation_needed) if f_obj.transportation_needed else 'None'}\n"
+                f"EC Output: {f_obj.ec_output}\n"
+            )
+            factory_details.config(state='normal')
+            factory_details.delete("1.0", tk.END)
+            factory_details.insert(tk.END, details_str)
+            factory_details.config(state='disabled')
 
         def update_transportation_fields(event):
             factory_type = factory_type_var.get()
+            f_obj = next((f for f in self.factories_list if f.name == factory_type), None)
+
+            # Also display the factory's characteristics
+            display_factory_characteristics(f_obj)
+
+            # Now handle the existing transportation-needed logic
             for trans_dropdown in transportation_frames:
                 trans_dropdown.destroy()
             transportation_frames.clear()
-            f_obj = next((f for f in self.factories_list if f.name == factory_type), None)
             if f_obj and f_obj.transportation_needed:
-                row_start = 3
+                row_start = 4
                 for idx, res in enumerate(f_obj.transportation_needed):
                     lbl = ttk.Label(add_window, text=f"{res}:")
                     lbl.grid(row=row_start + idx, column=0, padx=20, pady=5, sticky=tk.W)
@@ -1426,8 +1486,9 @@ class CompanionApp(tk.Tk):
                     trans_dropdown.grid(row=row_start + idx, column=1, padx=10, pady=5, sticky=tk.W)
                     transportation_frames.append(trans_dropdown)
 
+        transportation_frames = []
         factory_dropdown.bind("<<ComboboxSelected>>", update_transportation_fields)
-        update_transportation_fields(None)  # Initialize transportation fields for default selection
+        update_transportation_fields(None)  # Initialize for the default selection
 
         def add_factory():
             fac_name = factory_type_var.get()
@@ -1527,7 +1588,7 @@ class CompanionApp(tk.Tk):
 
         ttk.Button(add_window, text="Add Factory", command=add_factory).grid(row=50, column=0, columnspan=2, pady=20)
 
-    def find_nearest_resource(self, factory_terrain_index: int, resource: str) -> (int, Optional[int]):
+    def find_nearest_resource(self, factory_terrain_index: int, resource: str) -> {int, Optional[int]}:
         min_dist = float('inf')
         found_index = None
         for i, tile in enumerate(self.game_state.terrain_tiles):
@@ -1558,13 +1619,9 @@ class CompanionApp(tk.Tk):
         if factory_obj:
             # Optional partial refund
             self.selected_player.ec += factory_obj.construction_cost
-            # Also return produced resources to the player's stock if you want,
-            # but this is optional. Typically removing a factory doesn't
-            # retroactively remove its outputs from the game.
             for res, qty in factory_obj.output.items():
                 if res != "Consultancy Services":
                     self.selected_player.resources[res] += qty
-
             self.selected_player.factories.remove(factory_obj)
             self.refresh_factories()
             self.refresh_resources()
