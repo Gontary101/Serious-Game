@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import json
+from collections import defaultdict
 
 # ---------------------- Predefined Game Data (JSON) ----------------------
 
@@ -381,8 +382,13 @@ class CompanionApp(tk.Tk):
         self.game_state = game_state
         self.selected_player: Optional[Player] = None
 
-        # ---------- NEW: Store round history logs ----------
+        # ---------- Store basic round summary logs ----------
         self.history_log: List[str] = []
+
+        # ---------- Store each player's actions per round, and final round-based table ----------
+        from collections import defaultdict
+        self.player_actions = defaultdict(list)  # accumulates actions each round for each player
+        self.history_table = []                 # each element: {'round': X, 'players': {name: "actions+econ"}}
 
         # Load predefined data
         self.factories_list = self.load_factories()
@@ -478,7 +484,7 @@ class CompanionApp(tk.Tk):
         self.notebook.add(self.pollution_tab, text='Pollution & Costs')
         self.create_pollution_tab()
 
-        # ---------- NEW: History Tab ----------
+        # ---------- History Tab ----------
         self.history_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.history_tab, text='History')
         self.create_history_tab()
@@ -496,6 +502,8 @@ class CompanionApp(tk.Tk):
                 return
             try:
                 self.game_state.add_player(name)
+                # Initialize an empty action list for the new player
+                self.player_actions[name] = []
                 self.player_dropdown['values'] = [player.name for player in self.game_state.players]
                 add_window.destroy()
                 messagebox.showinfo("Success", f"Player '{name}' added successfully.")
@@ -676,7 +684,7 @@ class CompanionApp(tk.Tk):
 
         ttk.Button(frame, text="Calculate Round", command=self.calculate_round).pack(pady=10)
 
-    # ---------- NEW: Create History Tab ----------
+    # ---------- History Tab ----------
     def create_history_tab(self):
         frame = ttk.Frame(self.history_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -688,12 +696,77 @@ class CompanionApp(tk.Tk):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.history_text.configure(yscrollcommand=scrollbar.set)
 
+    # ---------------------- NEW REFRESH_HISTORY METHOD ----------------------
     def refresh_history(self):
-        # Display the stored round summaries (or logs) in the text widget
+        """
+        Display history in a table format with text wrapping for long entries.
+        """
         self.history_text.config(state="normal")
         self.history_text.delete("1.0", tk.END)
-        for entry in self.history_log:
-            self.history_text.insert(tk.END, entry + "\n\n")
+
+        players = [p.name for p in self.game_state.players]
+        if not self.history_table or not players:
+            self.history_text.insert(tk.END, "No history yet.\n")
+            self.history_text.config(state="disabled")
+            return
+
+        # Constants for formatting
+        ROUND_WIDTH = 6
+        CELL_WIDTH = 44
+        SEPARATOR = "| "
+
+        # Build header row
+        header = "Round".ljust(ROUND_WIDTH)
+        for pname in players:
+            header += SEPARATOR + pname.center(CELL_WIDTH)
+        header += "\n" + "-"*(ROUND_WIDTH + len(players)*(CELL_WIDTH+2))
+        self.history_text.insert(tk.END, header + "\n")
+
+        # Process each round
+        for row_data in self.history_table:
+            round_num = str(row_data['round'])
+            
+            # Get all player texts and split into lines
+            player_lines = {}
+            max_lines = 1
+            for pname in players:
+                cell_text = row_data['players'].get(pname, "")
+                cell_text = cell_text.replace("\n", " | ")
+                
+                # Split into chunks of CELL_WIDTH
+                lines = []
+                while cell_text:
+                    if len(cell_text) > CELL_WIDTH:
+                        split_point = cell_text.rfind(' ', 0, CELL_WIDTH)
+                        if split_point == -1:
+                            split_point = CELL_WIDTH
+                        lines.append(cell_text[:split_point].ljust(CELL_WIDTH))
+                        cell_text = cell_text[split_point:].strip()
+                    else:
+                        lines.append(cell_text.ljust(CELL_WIDTH))
+                        cell_text = ''
+                
+                player_lines[pname] = lines
+                max_lines = max(max_lines, len(lines))
+
+            # Output each line of the wrapped content
+            for line_idx in range(max_lines):
+                if line_idx == 0:
+                    row_line = round_num.ljust(ROUND_WIDTH)
+                else:
+                    row_line = " " * ROUND_WIDTH
+                    
+                for pname in players:
+                    row_line += SEPARATOR
+                    if line_idx < len(player_lines[pname]):
+                        row_line += player_lines[pname][line_idx]
+                    else:
+                        row_line += " " * CELL_WIDTH
+                        
+                self.history_text.insert(tk.END, row_line + "\n")
+            # Add blank line between rounds if not the last round
+            if row_data != self.history_table[-1]:
+                self.history_text.insert(tk.END, "\n")
         self.history_text.config(state="disabled")
 
     # ---------------------- Refresh Methods ----------------------
@@ -860,6 +933,12 @@ class CompanionApp(tk.Tk):
         round_summary = ""
         game_end = False
         winner = None
+        round_num = self.game_state.current_round
+
+        round_row = {
+            'round': round_num,
+            'players': {}
+        }
 
         for player in self.game_state.players:
             total_pollution = self.calculate_total_pollution_for_player(player)
@@ -881,14 +960,12 @@ class CompanionApp(tk.Tk):
                                 cost = max(cost - 10 * distance, 0)
                         transportation_cost += cost
 
-            # Resource-based revenue and resource production:
-            # First, handle direct factory EC output
+            # Direct factory EC
             factory_direct_ec = sum(f.ec_output for f in player.factories)
 
+            # Production revenue from using resource requirements
             production_revenue = 0
-            # Now factories consume required resources and produce outputs
             for factory in player.factories:
-                # Check if we have enough resources to run this factory
                 can_produce = True
                 for r_need, q_need in factory.resource_requirements.items():
                     if player.resources.get(r_need, 0) < q_need:
@@ -896,31 +973,26 @@ class CompanionApp(tk.Tk):
                         break
 
                 if can_produce:
-                    # Subtract the required resources
                     for r_need, q_need in factory.resource_requirements.items():
                         player.resources[r_need] -= q_need
-
-                    # Produce the factory's outputs
                     for r_out, q_out in factory.output.items():
                         if r_out == "Consultancy Services":
-                            # Consultancy Services count as direct EC
                             production_revenue += q_out
                         else:
-                            # Add produced resource to player's inventory
                             player.resources[r_out] += q_out
-                            # Also add revenue for these produced goods
                             production_revenue += q_out * 50
 
             total_production_revenue = factory_direct_ec + production_revenue
-
             total_expenses = carbon_tax + total_salary + total_maintenance + transportation_cost
 
-            # Add production revenue first
             player.ec += total_production_revenue
 
-            # Then subtract expenses
             if player.ec < total_expenses:
                 round_summary += f"{player.name} has insufficient Eco-Credits to cover expenses this round.\n"
+                action_list = self.player_actions[player.name]
+                action_str = "\n".join(action_list) if action_list else "No actions"
+                econ_str = f"(Insufficient EC!)"
+                round_row['players'][player.name] = f"Actions:\n{action_str}\n{econ_str}"
                 continue
 
             player.ec -= total_expenses
@@ -936,12 +1008,20 @@ class CompanionApp(tk.Tk):
                 f"  Current PP: {player.pp} PP\n\n"
             )
 
+            action_list = self.player_actions[player.name]
+            action_str = "\n".join(action_list) if action_list else "No actions"
+            econ_str = f"Net:{net_change}, EC:{player.ec}, PP:{player.pp}"
+            round_row['players'][player.name] = f"Actions:\n{action_str}\n\nEcon:\n{econ_str}"
+
             if player.ec >= 3000:
                 winner = player
                 game_end = True
                 break
 
         self.refresh_tabs()
+
+        for p in self.game_state.players:
+            self.player_actions[p.name].clear()
 
         if game_end:
             round_summary += f"{winner.name} has reached 3000 EC! The game ends now.\n"
@@ -952,7 +1032,7 @@ class CompanionApp(tk.Tk):
             if self.game_state.current_round > self.game_state.max_rounds:
                 self.end_game()
 
-        # ---------- NEW: Store the round summary in history and refresh ----------
+        self.history_table.append(round_row)
         self.history_log.append(round_summary)
         self.refresh_history()
 
@@ -968,7 +1048,6 @@ class CompanionApp(tk.Tk):
                 transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
                 if transport_info:
                     pollution = transport_info['pollution_per_distance'] * distance
-                    # Apply technology effects
                     for tech in player.technologies:
                         if "Reduce transportation pollution by 50%" in tech.effect and trans_type == "Electric":
                             pollution = pollution // 2
@@ -988,8 +1067,6 @@ class CompanionApp(tk.Tk):
                 total_pollution -= 3
 
         return max(total_pollution, 0)
-
-    # ---------------------- Worker Management ----------------------
 
     def hire_worker_dialog(self):
         if not self.selected_player:
@@ -1052,6 +1129,10 @@ class CompanionApp(tk.Tk):
             self.selected_player.ec -= salary
             w = Worker(role=role, salary=salary, benefit=info[role]["benefit"])
             self.selected_player.workers.append(w)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Hired {role}")
+
             add_window.destroy()
             self.refresh_workers()
             self.refresh_dashboard()
@@ -1114,6 +1195,10 @@ class CompanionApp(tk.Tk):
                 return
 
             factory_obj.workers_assigned[role] = assigned + 1
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Assigned {role} to {factory_obj.name}")
+
             assign_window.destroy()
             self.refresh_factories()
             messagebox.showinfo("Success", f"{role} assigned to {factory_obj.name}.")
@@ -1138,6 +1223,10 @@ class CompanionApp(tk.Tk):
                     if factory.workers_assigned[worker_role] == 0:
                         del factory.workers_assigned[worker_role]
             self.selected_player.workers.remove(worker_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed worker {worker_role}")
+
             self.refresh_workers()
             self.refresh_factories()
             self.refresh_dashboard()
@@ -1212,6 +1301,10 @@ class CompanionApp(tk.Tk):
 
             self.selected_player.ec -= tech_obj.cost
             self.selected_player.technologies.append(tech_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Purchased tech {tech_obj.name}")
+
             add_window.destroy()
             self.refresh_technologies()
             self.refresh_dashboard()
@@ -1233,6 +1326,10 @@ class CompanionApp(tk.Tk):
             refund = tech_obj.cost // 2  # optional partial refund
             self.selected_player.ec += refund
             self.selected_player.technologies.remove(tech_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed tech {tech_obj.name}")
+
             self.refresh_technologies()
             self.refresh_dashboard()
             messagebox.showinfo("Success", f"{tech_obj.name} removed. Refunded {refund} EC.")
@@ -1297,6 +1394,11 @@ class CompanionApp(tk.Tk):
             self.selected_player.resources[off_res] -= off_q
             self.selected_player.resources[req_res] += req_q
 
+            # Record action
+            self.player_actions[self.selected_player.name].append(
+                f"Traded away {off_q} {off_res} for {req_q} {req_res}"
+            )
+
             messagebox.showinfo("Trade", f"Successfully traded {off_q} {off_res} for {req_q} {req_res}.")
             trade_window.destroy()
             self.refresh_resources()
@@ -1344,6 +1446,11 @@ class CompanionApp(tk.Tk):
             self.selected_player.resources[res] -= qty
             self.selected_player.ec += total_sale
 
+            # Record action
+            self.player_actions[self.selected_player.name].append(
+                f"Sold {qty} {res} for {total_sale} EC"
+            )
+
             messagebox.showinfo("Sale Complete", f"Sold {qty}x {res} for {total_sale} EC.")
             sell_window.destroy()
             self.refresh_resources()
@@ -1379,6 +1486,12 @@ class CompanionApp(tk.Tk):
             try:
                 self.selected_player.ec -= terrain.purchase_cost
                 terrain.owned_by = self.selected_player.name
+
+                # Record action
+                self.player_actions[self.selected_player.name].append(
+                    f"Purchased terrain {terrain_id+1} ({terrain.terrain_type}) for {terrain.purchase_cost} EC"
+                )
+
                 self.refresh_terrain()
                 self.refresh_tabs()
                 messagebox.showinfo("Success", f"Terrain tile {terrain_id + 1} purchased successfully.")
@@ -1437,9 +1550,10 @@ class CompanionApp(tk.Tk):
         terrain_dropdown['values'] = owned_tiles
         terrain_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
 
-        # ---------- NEW: Text to display factory characteristics ----------
         factory_details = tk.Text(add_window, width=60, height=10, wrap='word', state='disabled')
         factory_details.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+
+        transportation_frames = []
 
         def display_factory_characteristics(f_obj):
             if not f_obj:
@@ -1467,10 +1581,9 @@ class CompanionApp(tk.Tk):
             factory_type = factory_type_var.get()
             f_obj = next((f for f in self.factories_list if f.name == factory_type), None)
 
-            # Also display the factory's characteristics
+            # Display factory's characteristics
             display_factory_characteristics(f_obj)
 
-            # Now handle the existing transportation-needed logic
             for trans_dropdown in transportation_frames:
                 trans_dropdown.destroy()
             transportation_frames.clear()
@@ -1486,9 +1599,8 @@ class CompanionApp(tk.Tk):
                     trans_dropdown.grid(row=row_start + idx, column=1, padx=10, pady=5, sticky=tk.W)
                     transportation_frames.append(trans_dropdown)
 
-        transportation_frames = []
         factory_dropdown.bind("<<ComboboxSelected>>", update_transportation_fields)
-        update_transportation_fields(None)  # Initialize for the default selection
+        update_transportation_fields(None)
 
         def add_factory():
             fac_name = factory_type_var.get()
@@ -1560,7 +1672,7 @@ class CompanionApp(tk.Tk):
                         return
                     new_factory.transportation[r] = {"type": trans_type, "distance": dist}
 
-            # ------------------ Worker Requirement Warning ------------------
+            # Worker requirement warning
             for role, count_needed in new_factory.workers_required.items():
                 available_workers = [w for w in self.selected_player.workers if w.role == role]
                 if len(available_workers) < count_needed:
@@ -1580,6 +1692,10 @@ class CompanionApp(tk.Tk):
                     assigned += 1
 
             self.selected_player.factories.append(new_factory)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Constructed factory {new_factory.name}")
+
             add_window.destroy()
             self.refresh_factories()
             self.refresh_resources()
@@ -1623,6 +1739,10 @@ class CompanionApp(tk.Tk):
                 if res != "Consultancy Services":
                     self.selected_player.resources[res] += qty
             self.selected_player.factories.remove(factory_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed factory {factory_obj.name}")
+
             self.refresh_factories()
             self.refresh_resources()
             self.refresh_dashboard()
@@ -1654,12 +1774,16 @@ class CompanionApp(tk.Tk):
             qty_purchased = cost // 100
             self.selected_player.resources[r] += qty_purchased
 
+        # Record action
+        for rr, cc in resource_costs.items():
+            q_p = cc // 100
+            self.player_actions[self.selected_player.name].append(f"Bought {q_p} {rr} from bank")
+
         self.refresh_dashboard()
         self.refresh_resources()
         return True
 
     # ---------------------- End Game ----------------------
-
     def end_game(self):
         scores = []
         for player in self.game_state.players:
