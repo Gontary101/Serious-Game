@@ -1,4 +1,3 @@
-```markdown
 # ECO-FACTORY CHALLENGE Companion App
 
 Bienvenue dans l’application de bureau **ECO-FACTORY CHALLENGE Companion App**, développée en Python (Tkinter). Cette application s'inscrit comme un outil complet pour gérer vos joueurs, terrains, usines, ressources, travailleurs, technologies, pollution et coûts, tout en fournissant une vue d'historique des actions et résultats de chaque round. Avec cette version, vous accédez à de nouvelles fonctionnalités, notamment :
