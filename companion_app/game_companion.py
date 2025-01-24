@@ -3,10 +3,10 @@ from tkinter import ttk, messagebox
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import json
+from collections import defaultdict
 
 # ---------------------- Predefined Game Data (JSON) ----------------------
 
-# Define the factories, technologies, transportation types, and terrain tiles as JSON strings
 FACTORIES_JSON = """
 [
     {
@@ -18,7 +18,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Forest"],
         "workers_required": {"Technician": 1},
-        "transportation_needed": []
+        "transportation_needed": [],
+        "ec_output": 100
     },
     {
         "name": "Crop Farm",
@@ -29,7 +30,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Plains", "Coastal"],
         "workers_required": {"Universal Worker": 1},
-        "transportation_needed": []
+        "transportation_needed": [],
+        "ec_output": 120
     },
     {
         "name": "Mine & Smelter",
@@ -40,7 +42,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Mountain"],
         "workers_required": {"Technician": 1},
-        "transportation_needed": ["Minerals"]
+        "transportation_needed": ["Minerals"],
+        "ec_output": 200
     },
     {
         "name": "Bioplastics Plant",
@@ -51,7 +54,8 @@ FACTORIES_JSON = """
         "resource_requirements": {"Wood": 1, "Water": 1},
         "allowed_terrain": ["Urban", "Plains", "Forest"],
         "workers_required": {"Environmental Advisor": 1},
-        "transportation_needed": ["Wood", "Water"]
+        "transportation_needed": ["Wood", "Water"],
+        "ec_output": 180
     },
     {
         "name": "Solar Panel Assembly",
@@ -62,7 +66,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Urban", "Plains"],
         "workers_required": {"Engineer": 1},
-        "transportation_needed": []
+        "transportation_needed": [],
+        "ec_output": 220
     },
     {
         "name": "Wind Turbine Factory",
@@ -73,7 +78,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Urban", "Plains"],
         "workers_required": {"Engineer": 1, "Technician": 1},
-        "transportation_needed": []
+        "transportation_needed": [],
+        "ec_output": 250
     },
     {
         "name": "Recycling Center",
@@ -84,7 +90,8 @@ FACTORIES_JSON = """
         "resource_requirements": {"Plastics": 1},
         "allowed_terrain": ["Urban"],
         "workers_required": {"Technician": 1},
-        "transportation_needed": ["Plastics"]
+        "transportation_needed": ["Plastics"],
+        "ec_output": 150
     },
     {
         "name": "Urban Manufacturing Plant",
@@ -95,7 +102,8 @@ FACTORIES_JSON = """
         "resource_requirements": {"Minerals": 2, "Recycled Materials": 2},
         "allowed_terrain": ["Urban"],
         "workers_required": {"Engineer": 1, "Technician": 1},
-        "transportation_needed": ["Minerals", "Recycled Materials"]
+        "transportation_needed": ["Minerals", "Recycled Materials"],
+        "ec_output": 300
     },
     {
         "name": "Sustainable Fishery",
@@ -106,7 +114,8 @@ FACTORIES_JSON = """
         "resource_requirements": {"Water": 1},
         "allowed_terrain": ["Coastal"],
         "workers_required": {"Universal Worker": 1},
-        "transportation_needed": ["Water"]
+        "transportation_needed": ["Water"],
+        "ec_output": 140
     },
     {
         "name": "Eco-Consulting Agency",
@@ -117,7 +126,8 @@ FACTORIES_JSON = """
         "resource_requirements": {},
         "allowed_terrain": ["Urban"],
         "workers_required": {"Environmental Advisor": 1},
-        "transportation_needed": []
+        "transportation_needed": [],
+        "ec_output": 250
     }
 ]
 """
@@ -245,14 +255,15 @@ class Factory:
     construction_cost: int
     operational_cost: int
     pollution: int
-    output: Dict[str, int]  # e.g., {'Wood': 2}
-    resource_requirements: Dict[str, int]  # e.g., {'Wood':1}
+    output: Dict[str, int]
+    resource_requirements: Dict[str, int]
     allowed_terrain: List[str]
     workers_required: Dict[str, int]
     transportation_needed: List[str]
     transportation: Dict[str, Dict[str, int]] = field(default_factory=dict)
     workers_assigned: Dict[str, int] = field(default_factory=dict)
     upgrades: List[str] = field(default_factory=list)
+    ec_output: int = 0  # direct money output from the factory each round
 
 @dataclass
 class Player:
@@ -263,6 +274,20 @@ class Player:
     technologies: List[Technology] = field(default_factory=list)
     workers: List[Worker] = field(default_factory=list)
     carbon_credits: int = 0
+    resources: Dict[str, int] = field(default_factory=lambda: {
+        'Minerals': 0,
+        'Wood': 0,
+        'Oil': 0,
+        'Water': 0,
+        'Plastics': 0,
+        'Bioplastics': 0,
+        'Solar Panel': 0,
+        'Wind Turbine': 0,
+        'Recycled Materials': 0,
+        'Manufactured Goods': 0,
+        'Fish': 0,
+        'Consultancy Services': 0
+    })
 
 @dataclass
 class TerrainTile:
@@ -294,7 +319,7 @@ class GameState:
         return json.loads(TRANSPORTATION_JSON)
 
     def initialize_terrain(self) -> List[TerrainTile]:
-        # Example initialization; in a real game, this could be randomized or set up differently
+        # Example initialization; in a real game, this might be randomized
         return [
             TerrainTile("Plains", 200, ["Wood", "Water"], 5),
             TerrainTile("Forest", 250, ["Wood"], 10),
@@ -323,42 +348,28 @@ class GameState:
             raise Exception("Maximum of 4 players reached.")
         self.players.append(Player(name=player_name))
 
-# ---------------------- Companion App GUI (Overhauled Visuals Only) ----------------------
+# ---------------------- Companion App GUI ----------------------
 
 class CompanionApp(tk.Tk):
     def __init__(self, game_state: GameState):
         super().__init__()
         self.title("Enhanced ECO-FACTORY CHALLENGE Companion App")
-        # New window size for a refreshed look
-        self.geometry("1400x800")
+        self.geometry("1600x900")
         
-        # Configure overall background color
         self.configure(bg="#F0F4F7")
 
-        # Create a custom style for the entire application
         style = ttk.Style(self)
-        # Choose a built-in theme to start with (e.g., 'clam')
         style.theme_use("clam")
-
-        # Frame style
         style.configure("TFrame", background="#F0F4F7")
-
-        # Label style
         style.configure("TLabel", background="#F0F4F7", font=("Arial", 10, "bold"), foreground="#2B2B2B")
-
-        # Button style
         style.configure("TButton",
                         font=("Arial", 10, "bold"),
                         foreground="#FFFFFF",
                         background="#6699CC",
                         padding=6)
-
-        # Notebook tab style
         style.configure("TNotebook", background="#F0F4F7")
         style.configure("TNotebook.Tab", background="#BED7F3", foreground="#000000", padding=(10, 5))
-
-        # Treeview style
-        style.configure("Treeview", 
+        style.configure("Treeview",
                         background="#FFFFFF",
                         foreground="#2B2B2B",
                         rowheight=25,
@@ -366,15 +377,18 @@ class CompanionApp(tk.Tk):
         style.map("Treeview",
                   background=[("selected", "#5B9BD5")],
                   foreground=[("selected", "#FFFFFF")])
-
-        # Scrollbar style
         style.configure("Vertical.TScrollbar", background="#BED7F3")
-
-        # Messagebox styling is not natively customizable beyond system defaults,
-        # but we keep a consistent color scheme in app elements.
 
         self.game_state = game_state
         self.selected_player: Optional[Player] = None
+
+        # ---------- Store basic round summary logs ----------
+        self.history_log: List[str] = []
+
+        # ---------- Store each player's actions per round, and final round-based table ----------
+        from collections import defaultdict
+        self.player_actions = defaultdict(list)  # accumulates actions each round for each player
+        self.history_table = []                 # each element: {'round': X, 'players': {name: "actions+econ"}}
 
         # Load predefined data
         self.factories_list = self.load_factories()
@@ -396,7 +410,8 @@ class CompanionApp(tk.Tk):
                 resource_requirements=f["resource_requirements"],
                 allowed_terrain=f["allowed_terrain"],
                 workers_required=f["workers_required"],
-                transportation_needed=f["transportation_needed"]
+                transportation_needed=f["transportation_needed"],
+                ec_output=f.get("ec_output", 0)
             )
             factories.append(factory)
         return factories
@@ -469,6 +484,13 @@ class CompanionApp(tk.Tk):
         self.notebook.add(self.pollution_tab, text='Pollution & Costs')
         self.create_pollution_tab()
 
+        # ---------- History Tab ----------
+        self.history_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.history_tab, text='History')
+        self.create_history_tab()
+
+    # ---------------------- Player Management ----------------------
+
     def add_player_dialog(self):
         def add_player():
             name = entry.get().strip()
@@ -480,8 +502,11 @@ class CompanionApp(tk.Tk):
                 return
             try:
                 self.game_state.add_player(name)
+                # Initialize an empty action list for the new player
+                self.player_actions[name] = []
                 self.player_dropdown['values'] = [player.name for player in self.game_state.players]
                 add_window.destroy()
+                messagebox.showinfo("Success", f"Player '{name}' added successfully.")
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
@@ -501,6 +526,8 @@ class CompanionApp(tk.Tk):
         self.selected_player = next((p for p in self.game_state.players if p.name == player_name), None)
         self.refresh_tabs()
 
+    # ---------------------- Tabs Creation ----------------------
+
     def create_dashboard_tab(self):
         self.dashboard_info = ttk.Label(
             self.dashboard_tab,
@@ -515,7 +542,6 @@ class CompanionApp(tk.Tk):
         frame = ttk.Frame(self.terrain_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Terrain List
         self.terrain_tree = ttk.Treeview(
             frame,
             columns=("ID", "Terrain Type", "Purchase Cost", "Resources", "Carbon Offset", "Owned By"),
@@ -526,12 +552,10 @@ class CompanionApp(tk.Tk):
             self.terrain_tree.column(col, width=150, anchor=tk.CENTER)
         self.terrain_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.terrain_tree.yview)
         self.terrain_tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Terrain Management Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
@@ -544,23 +568,22 @@ class CompanionApp(tk.Tk):
         frame = ttk.Frame(self.factories_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Factory List
         self.factory_tree = ttk.Treeview(
             frame,
-            columns=("Name", "Construction Cost", "Operational Cost", "Pollution", "Output", "Resources", "Transportation", "Workers"),
+            columns=("Name", "Construction Cost", "Operational Cost", "Pollution", "Output",
+                     "Resources", "Transportation", "Workers", "EC Output"),
             show='headings'
         )
-        for col in ("Name", "Construction Cost", "Operational Cost", "Pollution", "Output", "Resources", "Transportation", "Workers"):
+        for col in ("Name", "Construction Cost", "Operational Cost", "Pollution", "Output",
+                    "Resources", "Transportation", "Workers", "EC Output"):
             self.factory_tree.heading(col, text=col)
             self.factory_tree.column(col, width=120, anchor=tk.CENTER)
         self.factory_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.factory_tree.yview)
         self.factory_tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Factory Management Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
@@ -572,7 +595,6 @@ class CompanionApp(tk.Tk):
         frame = ttk.Frame(self.technologies_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Technology List
         self.tech_tree = ttk.Treeview(
             frame,
             columns=("Name", "Category", "Cost", "Maintenance", "Effect", "Prerequisites"),
@@ -583,12 +605,10 @@ class CompanionApp(tk.Tk):
             self.tech_tree.column(col, width=150, anchor=tk.CENTER)
         self.tech_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tech_tree.yview)
         self.tech_tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Technology Management Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
@@ -600,7 +620,6 @@ class CompanionApp(tk.Tk):
         frame = ttk.Frame(self.workers_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Worker List
         self.worker_tree = ttk.Treeview(
             frame,
             columns=("Role", "Salary", "Benefit"),
@@ -611,12 +630,10 @@ class CompanionApp(tk.Tk):
             self.worker_tree.column(col, width=200, anchor=tk.CENTER)
         self.worker_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.worker_tree.yview)
         self.worker_tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Worker Management Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
@@ -629,34 +646,33 @@ class CompanionApp(tk.Tk):
         frame = ttk.Frame(self.resources_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Resource List
         self.resource_tree = ttk.Treeview(
             frame,
-            columns=("Resource", "Produced", "Consumed", "Traded"),
+            columns=("Resource", "Produced", "Consumed", "Traded", "Inventory"),
             show='headings'
         )
-        for col in ("Resource", "Produced", "Consumed", "Traded"):
+        for col in ("Resource", "Produced", "Consumed", "Traded", "Inventory"):
             self.resource_tree.heading(col, text=col)
-            self.resource_tree.column(col, width=150, anchor=tk.CENTER)
+            self.resource_tree.column(col, width=120, anchor=tk.CENTER)
         self.resource_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Scrollbar
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.resource_tree.yview)
         self.resource_tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Resource Management Buttons
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10)
 
         ttk.Button(btn_frame, text="Trade Resources", command=self.trade_resources_dialog).pack(pady=5)
+        ttk.Button(btn_frame, text="Sell Resources", command=self.sell_resources_dialog).pack(pady=5)
         ttk.Button(btn_frame, text="Refresh Resources", command=self.refresh_resources).pack(pady=5)
+
+        self.refresh_resources()
 
     def create_pollution_tab(self):
         frame = ttk.Frame(self.pollution_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Pollution and Costs Display
         self.pollution_info = ttk.Label(
             frame,
             text="Select a player to view pollution and costs.",
@@ -668,6 +684,93 @@ class CompanionApp(tk.Tk):
 
         ttk.Button(frame, text="Calculate Round", command=self.calculate_round).pack(pady=10)
 
+    # ---------- History Tab ----------
+    def create_history_tab(self):
+        frame = ttk.Frame(self.history_tab)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.history_text = tk.Text(frame, wrap="word", state="normal", height=30)
+        self.history_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.history_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.history_text.configure(yscrollcommand=scrollbar.set)
+
+    # ---------------------- NEW REFRESH_HISTORY METHOD ----------------------
+    def refresh_history(self):
+        """
+        Display history in a table format with text wrapping for long entries.
+        """
+        self.history_text.config(state="normal")
+        self.history_text.delete("1.0", tk.END)
+
+        players = [p.name for p in self.game_state.players]
+        if not self.history_table or not players:
+            self.history_text.insert(tk.END, "No history yet.\n")
+            self.history_text.config(state="disabled")
+            return
+
+        # Constants for formatting
+        ROUND_WIDTH = 6
+        CELL_WIDTH = 44
+        SEPARATOR = "| "
+
+        # Build header row
+        header = "Round".ljust(ROUND_WIDTH)
+        for pname in players:
+            header += SEPARATOR + pname.center(CELL_WIDTH)
+        header += "\n" + "-"*(ROUND_WIDTH + len(players)*(CELL_WIDTH+2))
+        self.history_text.insert(tk.END, header + "\n")
+
+        # Process each round
+        for row_data in self.history_table:
+            round_num = str(row_data['round'])
+            
+            # Get all player texts and split into lines
+            player_lines = {}
+            max_lines = 1
+            for pname in players:
+                cell_text = row_data['players'].get(pname, "")
+                cell_text = cell_text.replace("\n", " | ")
+                
+                # Split into chunks of CELL_WIDTH
+                lines = []
+                while cell_text:
+                    if len(cell_text) > CELL_WIDTH:
+                        split_point = cell_text.rfind(' ', 0, CELL_WIDTH)
+                        if split_point == -1:
+                            split_point = CELL_WIDTH
+                        lines.append(cell_text[:split_point].ljust(CELL_WIDTH))
+                        cell_text = cell_text[split_point:].strip()
+                    else:
+                        lines.append(cell_text.ljust(CELL_WIDTH))
+                        cell_text = ''
+                
+                player_lines[pname] = lines
+                max_lines = max(max_lines, len(lines))
+
+            # Output each line of the wrapped content
+            for line_idx in range(max_lines):
+                if line_idx == 0:
+                    row_line = round_num.ljust(ROUND_WIDTH)
+                else:
+                    row_line = " " * ROUND_WIDTH
+                    
+                for pname in players:
+                    row_line += SEPARATOR
+                    if line_idx < len(player_lines[pname]):
+                        row_line += player_lines[pname][line_idx]
+                    else:
+                        row_line += " " * CELL_WIDTH
+                        
+                self.history_text.insert(tk.END, row_line + "\n")
+            # Add blank line between rounds if not the last round
+            if row_data != self.history_table[-1]:
+                self.history_text.insert(tk.END, "\n")
+        self.history_text.config(state="disabled")
+
+    # ---------------------- Refresh Methods ----------------------
+
     def refresh_tabs(self):
         self.refresh_dashboard()
         self.refresh_terrain()
@@ -676,6 +779,7 @@ class CompanionApp(tk.Tk):
         self.refresh_workers()
         self.refresh_resources()
         self.refresh_pollution()
+        self.refresh_history()
 
     def refresh_dashboard(self):
         if not self.selected_player:
@@ -710,11 +814,20 @@ class CompanionApp(tk.Tk):
         if not self.selected_player:
             return
         for factory in self.selected_player.factories:
-            output_str = ", ".join([f"{k}: {v}" for k, v in factory.output.items()])
-            resources_str = ", ".join([f"{k}: {v}" for k, v in factory.resource_requirements.items()]) if factory.resource_requirements else "None"
-            transportation = ", ".join([f"{res}: {trans['type']} ({trans['distance']})"
-                                        for res, trans in factory.transportation.items()]) if factory.transportation else "N/A"
-            workers = ", ".join([f"{role}: {count}" for role, count in factory.workers_assigned.items()]) if factory.workers_assigned else "None"
+            output_str = ", ".join(f"{k}: {v}" for k, v in factory.output.items())
+            resources_str = "None"
+            if factory.resource_requirements:
+                resources_str = ", ".join(f"{k}: {v}" for k, v in factory.resource_requirements.items())
+            transportation = "N/A"
+            if factory.transportation:
+                transportation = ", ".join(
+                    f"{res}: {trans['type']} ({trans['distance']})"
+                    for res, trans in factory.transportation.items()
+                )
+            workers = "None"
+            if factory.workers_assigned:
+                workers = ", ".join(f"{role}: {count}" for role, count in factory.workers_assigned.items())
+
             self.factory_tree.insert("", tk.END, values=(
                 factory.name,
                 factory.construction_cost,
@@ -723,7 +836,8 @@ class CompanionApp(tk.Tk):
                 output_str,
                 resources_str,
                 transportation,
-                workers
+                workers,
+                factory.ec_output
             ))
 
     def refresh_technologies(self):
@@ -759,24 +873,13 @@ class CompanionApp(tk.Tk):
             self.resource_tree.delete(item)
         if not self.selected_player:
             return
-        # Initialize all resources
         resource_summary = {
-            'Minerals': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Wood': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Oil': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Water': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Plastics': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Bioplastics': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Solar Panel': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Wind Turbine': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Recycled Materials': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Manufactured Goods': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Fish': {'Produced': 0, 'Consumed': 0, 'Traded': 0},
-            'Consultancy Services': {'Produced': 0, 'Consumed': 0, 'Traded': 0}
+            r: {'Produced': 0, 'Consumed': 0, 'Traded': 0, 'Inventory': self.selected_player.resources[r]}
+            for r in self.selected_player.resources
         }
         for factory in self.selected_player.factories:
             for res, qty in factory.output.items():
-                if res in resource_summary:
+                if res != "Consultancy Services":  # Consultancy Services are treated as EC
                     resource_summary[res]['Produced'] += qty
             for res, qty in factory.resource_requirements.items():
                 if res in resource_summary:
@@ -786,7 +889,8 @@ class CompanionApp(tk.Tk):
                 res,
                 data['Produced'],
                 data['Consumed'],
-                data['Traded']
+                data['Traded'],
+                data['Inventory']
             ))
 
     def refresh_pollution(self):
@@ -797,48 +901,31 @@ class CompanionApp(tk.Tk):
         carbon_tax = 5 * total_pollution
         total_salary = sum(worker.salary for worker in self.selected_player.workers)
         total_maintenance = sum(tech.maintenance for tech in self.selected_player.technologies)
-        info = (
-            f"Total Pollution Points (PP): {total_pollution}\n"
-            f"Carbon Tax (5 EC × PP): {carbon_tax} EC\n"
-            f"Total Worker Salaries: {total_salary} EC\n"
-            f"Total Technology Maintenance: {total_maintenance} EC"
-        )
-        self.pollution_info.config(text=info)
-
-    def calculate_total_pollution_for_player(self, player: Player) -> int:
-        total_pollution = 0
-        for factory in player.factories:
-            total_pollution += factory.pollution
-            # Add pollution from transportation
+        transportation_cost = 0
+        for factory in self.selected_player.factories:
             for trans in factory.transportation.values():
                 trans_type = trans['type']
                 distance = trans['distance']
                 transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
                 if transport_info:
-                    pollution = transport_info['pollution_per_distance'] * distance
-                    # Check for technology effects that reduce pollution
-                    for tech in player.technologies:
-                        if "Reduce transportation pollution by 50%" in tech.effect and trans_type == "Electric":
-                            pollution = pollution // 2
-                    total_pollution += pollution
-        # Apply pollution reductions from technologies
-        for tech in player.technologies:
-            if "pollution" in tech.effect.lower():
-                import re
-                reductions = map(int, re.findall(r'-\d+', tech.effect))
-                for reduction in reductions:
-                    total_pollution += reduction  # reduction is negative
-        # Apply pollution reductions from workers
-        for worker in player.workers:
-            if worker.role == "Environmental Advisor":
-                # Assuming each advisor reduces pollution by 3
-                total_pollution -= 3
-        if total_pollution < 0:
-            total_pollution = 0
-        return total_pollution
+                    cost = transport_info['cost_per_distance'] * distance
+                    for tech in self.selected_player.technologies:
+                        if "Reduce Fossil Fuel transportation costs by 10 EC per distance unit." in tech.effect and trans_type == "Fossil Fuel":
+                            cost = max(cost - 10 * distance, 0)
+                    transportation_cost += cost
+
+        info = (
+            f"Total Pollution Points (PP): {total_pollution}\n"
+            f"Carbon Tax (5 EC × PP): {carbon_tax} EC\n"
+            f"Total Worker Salaries: {total_salary} EC\n"
+            f"Total Technology Maintenance: {total_maintenance} EC\n"
+            f"Total Transportation Cost: {transportation_cost} EC"
+        )
+        self.pollution_info.config(text=info)
+
+    # ---------------------- Round Calculation ----------------------
 
     def calculate_round(self):
-        # ---------------------- FIX START ----------------------
         if not self.game_state.players:
             messagebox.showerror("Error", "No players in the game.")
             return
@@ -846,17 +933,20 @@ class CompanionApp(tk.Tk):
         round_summary = ""
         game_end = False
         winner = None
+        round_num = self.game_state.current_round
+
+        round_row = {
+            'round': round_num,
+            'players': {}
+        }
 
         for player in self.game_state.players:
-            # Calculate total pollution and apply carbon tax
             total_pollution = self.calculate_total_pollution_for_player(player)
             carbon_tax = 5 * total_pollution
 
-            # Calculate total salaries and maintenance
             total_salary = sum(worker.salary for worker in player.workers)
             total_maintenance = sum(tech.maintenance for tech in player.technologies)
 
-            # Calculate transportation costs
             transportation_cost = 0
             for factory in player.factories:
                 for trans in factory.transportation.values():
@@ -865,51 +955,76 @@ class CompanionApp(tk.Tk):
                     transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
                     if transport_info:
                         cost = transport_info['cost_per_distance'] * distance
-                        # Check for technology effects that reduce transportation costs
                         for tech in player.technologies:
                             if "Reduce Fossil Fuel transportation costs by 10 EC per distance unit." in tech.effect and trans_type == "Fossil Fuel":
                                 cost = max(cost - 10 * distance, 0)
                         transportation_cost += cost
 
-            # Total expenses
-            total_expenses = carbon_tax + total_salary + total_maintenance + transportation_cost
+            # Direct factory EC
+            factory_direct_ec = sum(f.ec_output for f in player.factories)
 
-            # Deduct expenses from EC
-            if player.ec < total_expenses:
-                round_summary += f"{player.name} has insufficient Eco-Credits to cover the expenses this round.\n"
-                continue  # Skip to next player
-            player.ec -= total_expenses
-            player.pp = total_pollution  # Update Pollution Points
-
-            # Add production revenue
+            # Production revenue from using resource requirements
             production_revenue = 0
             for factory in player.factories:
-                for res, qty in factory.output.items():
-                    if res == "Consultancy Services":
-                        production_revenue += qty  # Assuming 'Consultancy Services' are already valued
-                    else:
-                        production_revenue += qty * 50  # Base price
-            player.ec += production_revenue
+                can_produce = True
+                for r_need, q_need in factory.resource_requirements.items():
+                    if player.resources.get(r_need, 0) < q_need:
+                        can_produce = False
+                        break
 
+                if can_produce:
+                    for r_need, q_need in factory.resource_requirements.items():
+                        player.resources[r_need] -= q_need
+                    for r_out, q_out in factory.output.items():
+                        if r_out == "Consultancy Services":
+                            production_revenue += q_out
+                        else:
+                            player.resources[r_out] += q_out
+                            production_revenue += q_out * 50
+
+            total_production_revenue = factory_direct_ec + production_revenue
+            total_expenses = carbon_tax + total_salary + total_maintenance + transportation_cost
+
+            player.ec += total_production_revenue
+
+            if player.ec < total_expenses:
+                round_summary += f"{player.name} has insufficient Eco-Credits to cover expenses this round.\n"
+                action_list = self.player_actions[player.name]
+                action_str = "\n".join(action_list) if action_list else "No actions"
+                econ_str = f"(Insufficient EC!)"
+                round_row['players'][player.name] = f"Actions:\n{action_str}\n{econ_str}"
+                continue
+
+            player.ec -= total_expenses
+            player.pp = total_pollution
+
+            net_change = total_production_revenue - total_expenses
             round_summary += (
                 f"{player.name}:\n"
+                f"  Production Revenue: {total_production_revenue} EC\n"
                 f"  Expenses: {total_expenses} EC\n"
-                f"  Revenue: {production_revenue} EC\n"
-                f"  Net Change: {production_revenue - total_expenses} EC\n"
+                f"  Net Change: {net_change} EC\n"
                 f"  Current EC: {player.ec} EC\n"
                 f"  Current PP: {player.pp} PP\n\n"
             )
 
-            # Check for new end condition (e.g., 3000 EC)
+            action_list = self.player_actions[player.name]
+            action_str = "\n".join(action_list) if action_list else "No actions"
+            econ_str = f"Net:{net_change}, EC:{player.ec}, PP:{player.pp}"
+            round_row['players'][player.name] = f"Actions:\n{action_str}\n\nEcon:\n{econ_str}"
+
             if player.ec >= 3000:
                 winner = player
                 game_end = True
-                break  # Exit the loop as the game should end immediately
+                break
 
         self.refresh_tabs()
 
+        for p in self.game_state.players:
+            self.player_actions[p.name].clear()
+
         if game_end:
-            round_summary += f"{winner.name} has reached 3000 EC! The game will now end.\n"
+            round_summary += f"{winner.name} has reached 3000 EC! The game ends now.\n"
             self.end_game()
         else:
             round_summary += f"Round {self.game_state.current_round} completed.\n"
@@ -917,44 +1032,113 @@ class CompanionApp(tk.Tk):
             if self.game_state.current_round > self.game_state.max_rounds:
                 self.end_game()
 
-        # Display the summary
-        messagebox.showinfo("Round Calculated", round_summary)
-        # ---------------------- FIX END ----------------------
+        self.history_table.append(round_row)
+        self.history_log.append(round_summary)
+        self.refresh_history()
 
-    def calculate_total_pollution_for_player_fixed(self, player: Player) -> int:
-        # This method ensures that pollution calculations are accurate per player
+        messagebox.showinfo("Round Calculated", round_summary)
+
+    def calculate_total_pollution_for_player(self, player: Player) -> int:
         total_pollution = 0
         for factory in player.factories:
             total_pollution += factory.pollution
-            # Add pollution from transportation
             for trans in factory.transportation.values():
                 trans_type = trans['type']
                 distance = trans['distance']
                 transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
                 if transport_info:
                     pollution = transport_info['pollution_per_distance'] * distance
-                    # Check for technology effects that reduce pollution
                     for tech in player.technologies:
                         if "Reduce transportation pollution by 50%" in tech.effect and trans_type == "Electric":
                             pollution = pollution // 2
                     total_pollution += pollution
-        # Apply pollution reductions from technologies
+
+        # Tech-based pollution reductions
         for tech in player.technologies:
             if "pollution" in tech.effect.lower():
                 import re
                 reductions = map(int, re.findall(r'-\d+', tech.effect))
                 for reduction in reductions:
                     total_pollution += reduction  # reduction is negative
-        # Apply pollution reductions from workers
+
+        # Worker-based pollution reductions
         for worker in player.workers:
             if worker.role == "Environmental Advisor":
-                # Assuming each advisor reduces pollution by 3
                 total_pollution -= 3
-        if total_pollution < 0:
-            total_pollution = 0
-        return total_pollution
 
-    # ---------------------- Assign Worker Method Fix ----------------------
+        return max(total_pollution, 0)
+
+    def hire_worker_dialog(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+
+        add_window = tk.Toplevel(self)
+        add_window.title("Hire Worker")
+        add_window.geometry("400x300")
+        add_window.configure(bg="#F0F4F7")
+
+        ttk.Label(add_window, text="Select Worker Role:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        worker_role_var = tk.StringVar()
+        worker_roles = ["Engineer", "Technician", "Environmental Advisor", "Universal Worker"]
+        worker_dropdown = ttk.Combobox(add_window, textvariable=worker_role_var, state="readonly")
+        worker_dropdown['values'] = worker_roles
+        worker_dropdown.current(0)
+        worker_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+
+        worker_details = tk.Text(add_window, width=40, height=5, wrap='word', state='disabled')
+        worker_details.grid(row=1, column=0, columnspan=2, padx=10, pady=5)
+
+        def display_worker_details(event):
+            role = worker_role_var.get()
+            info = {
+                "Engineer": {"salary": 50, "benefit": "+20% production in advanced factories, or +10% in basic factories."},
+                "Technician": {"salary": 30, "benefit": "Maintains baseline production. Required for certain factories."},
+                "Environmental Advisor": {"salary": 40, "benefit": "-3 pollution in the factory they’re assigned to."},
+                "Universal Worker": {"salary": 20, "benefit": "Minimal production help; no special pollution or efficiency bonuses."}
+            }
+            if role in info:
+                details = (
+                    f"Role: {role}\n"
+                    f"Salary: {info[role]['salary']} EC/round\n"
+                    f"Benefit: {info[role]['benefit']}"
+                )
+                worker_details.config(state='normal')
+                worker_details.delete(1.0, tk.END)
+                worker_details.insert(tk.END, details)
+                worker_details.config(state='disabled')
+
+        worker_dropdown.bind("<<ComboboxSelected>>", display_worker_details)
+        display_worker_details(None)  # Display details for the default selection
+
+        def hire_worker():
+            role = worker_role_var.get()
+            info = {
+                "Engineer": {"salary": 50, "benefit": "+20% production in advanced factories, or +10% in basic factories."},
+                "Technician": {"salary": 30, "benefit": "Maintains baseline production. Required for certain factories."},
+                "Environmental Advisor": {"salary": 40, "benefit": "-3 pollution in the factory they’re assigned to."},
+                "Universal Worker": {"salary": 20, "benefit": "Minimal production help; no special pollution or efficiency bonuses."}
+            }
+            if role not in info:
+                messagebox.showerror("Error", "Invalid worker role selected.")
+                return
+            salary = info[role]["salary"]
+            if self.selected_player.ec < salary:
+                messagebox.showerror("Error", "Not enough EC to hire this worker.")
+                return
+            self.selected_player.ec -= salary
+            w = Worker(role=role, salary=salary, benefit=info[role]["benefit"])
+            self.selected_player.workers.append(w)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Hired {role}")
+
+            add_window.destroy()
+            self.refresh_workers()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{role} hired successfully.")
+
+        ttk.Button(add_window, text="Hire", command=hire_worker).grid(row=2, column=0, columnspan=2, pady=20)
 
     def assign_worker_dialog(self):
         if not self.selected_player:
@@ -986,63 +1170,293 @@ class CompanionApp(tk.Tk):
         factory_dropdown['values'] = factories
         factory_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
 
-        ttk.Button(
-            assign_window,
-            text="Assign",
-            command=lambda: self.assign_worker(worker_var.get(), factory_var.get(), assign_window)
-        ).grid(row=2, column=0, columnspan=2, pady=20)
+        def assign_worker():
+            if not worker_var.get() or not factory_var.get():
+                messagebox.showerror("Error", "Select both worker and factory.")
+                return
+            try:
+                worker_index = int(worker_var.get().split('#')[1]) - 1
+                worker_obj = self.selected_player.workers[worker_index]
+            except (IndexError, ValueError):
+                messagebox.showerror("Error", "Invalid worker selection.")
+                return
+            factory_obj = next((f for f in self.selected_player.factories if f.name == factory_var.get()), None)
+            if not factory_obj:
+                messagebox.showerror("Error", "Invalid factory selected.")
+                return
+            role = worker_obj.role.strip()
+            if role not in factory_obj.workers_required:
+                messagebox.showerror("Error", f"{role} is not required for {factory_obj.name}.")
+                return
+            required = factory_obj.workers_required[role]
+            assigned = factory_obj.workers_assigned.get(role, 0)
+            if assigned >= required:
+                messagebox.showerror("Error", f"No need for more {role}s in {factory_obj.name}.")
+                return
 
-    def assign_worker_fixed(self, worker_selection: str, factory_name: str, window):
-        if not worker_selection or not factory_name:
-            messagebox.showerror("Error", "Please select both worker and factory.")
-            return
-        # Extract worker index
-        try:
-            worker_index = int(worker_selection.split('#')[1]) - 1
-            worker = self.selected_player.workers[worker_index]
-        except (IndexError, ValueError):
-            messagebox.showerror("Error", "Invalid worker selection.")
-            return
-        factory = next((f for f in self.selected_player.factories if f.name == factory_name), None)
-        if not factory:
-            messagebox.showerror("Error", "Invalid factory selected.")
-            return
-        # Normalize worker.role to ensure no leading/trailing spaces and correct casing
-        worker_role = worker.role.strip()
-        # Check if factory requires this worker role
-        if worker_role not in factory.workers_required:
-            messagebox.showerror("Error", f"{worker_role} is not required for {factory.name}.")
-            return
-        required = factory.workers_required.get(worker_role, 0)
-        assigned = factory.workers_assigned.get(worker_role, 0)
-        if assigned >= required:
-            messagebox.showerror("Error", f"No need for more {worker_role}s in {factory.name}.")
-            return
-        # Assign worker
-        factory.workers_assigned[worker_role] = assigned + 1
-        self.refresh_factories()
-        window.destroy()
-        messagebox.showinfo("Success", f"{worker_role} assigned to {factory.name}.")
+            factory_obj.workers_assigned[role] = assigned + 1
 
-    # Replace the original assign_worker method with the fixed one
-    assign_worker = assign_worker_fixed
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Assigned {role} to {factory_obj.name}")
 
-    # ---------------------- End Game ----------------------
+            assign_window.destroy()
+            self.refresh_factories()
+            messagebox.showinfo("Success", f"{role} assigned to {factory_obj.name}.")
 
-    def end_game(self):
-        # Calculate final scores
-        scores = []
-        for player in self.game_state.players:
-            score = player.ec / (1 + player.pp)
-            scores.append((player.name, score))
-        scores.sort(key=lambda x: x[1], reverse=True)
-        winner = scores[0]
-        game_over_message = "Game has ended.\n\nFinal Scores:\n"
-        for name, score in scores:
-            game_over_message += f"{name}: {score:.2f}\n"
-        game_over_message += f"\nWinner: {winner[0]} with a score of {winner[1]:.2f}!"
-        messagebox.showinfo("Game Over", game_over_message)
-        self.destroy()
+        ttk.Button(assign_window, text="Assign", command=assign_worker).grid(row=2, column=0, columnspan=2, pady=20)
+
+    def remove_worker(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+        selected_item = self.worker_tree.selection()
+        if not selected_item:
+            messagebox.showerror("Error", "No worker selected.")
+            return
+        worker_role = self.worker_tree.item(selected_item, 'values')[0]
+        worker_obj = next((w for w in self.selected_player.workers if w.role == worker_role), None)
+        if worker_obj:
+            # Unassign from factories
+            for factory in self.selected_player.factories:
+                if worker_role in factory.workers_assigned:
+                    factory.workers_assigned[worker_role] = max(factory.workers_assigned[worker_role] - 1, 0)
+                    if factory.workers_assigned[worker_role] == 0:
+                        del factory.workers_assigned[worker_role]
+            self.selected_player.workers.remove(worker_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed worker {worker_role}")
+
+            self.refresh_workers()
+            self.refresh_factories()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{worker_role} removed successfully.")
+
+    # ---------------------- Technology Management ----------------------
+
+    def purchase_technology_dialog(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+
+        add_window = tk.Toplevel(self)
+        add_window.title("Purchase Technology")
+        add_window.geometry("600x400")
+        add_window.configure(bg="#F0F4F7")
+
+        ttk.Label(add_window, text="Select Technology:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        tech_type_var = tk.StringVar()
+        tech_names = [tech.name for tech in self.technologies_list]
+        tech_dropdown = ttk.Combobox(add_window, textvariable=tech_type_var, state="readonly")
+        tech_dropdown['values'] = tech_names
+        tech_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+
+        tech_details = tk.Text(add_window, width=60, height=15, wrap='word', state='disabled')
+        tech_details.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+
+        def display_tech_details(event):
+            selected_tech_name = tech_type_var.get()
+            tech_obj = next((t for t in self.technologies_list if t.name == selected_tech_name), None)
+            if tech_obj:
+                details = (
+                    f"Name: {tech_obj.name}\n"
+                    f"Category: {tech_obj.category}\n"
+                    f"Cost: {tech_obj.cost} EC\n"
+                    f"Maintenance: {tech_obj.maintenance} EC/round\n"
+                    f"Effect: {tech_obj.effect}\n"
+                    f"Prerequisites: {', '.join(tech_obj.prerequisites) if tech_obj.prerequisites else 'None'}"
+                )
+                tech_details.config(state='normal')
+                tech_details.delete(1.0, tk.END)
+                tech_details.insert(tk.END, details)
+                tech_details.config(state='disabled')
+
+        tech_dropdown.bind("<<ComboboxSelected>>", display_tech_details)
+        display_tech_details(None)  # Display details for the default selection
+
+        def purchase_technology():
+            name = tech_type_var.get()
+            if not name:
+                messagebox.showerror("Error", "Please select a technology.")
+                return
+            tech_obj = next((t for t in self.technologies_list if t.name == name), None)
+            if not tech_obj:
+                messagebox.showerror("Error", "Invalid technology selected.")
+                return
+            if self.selected_player.ec < tech_obj.cost:
+                messagebox.showerror("Error", "Not enough EC to purchase this technology.")
+                return
+            # Check prerequisites
+            for prereq in tech_obj.prerequisites:
+                has_worker = any(w.role == prereq for w in self.selected_player.workers)
+                has_tech = any(t.name == prereq for t in self.selected_player.technologies)
+                if not (has_worker or has_tech):
+                    messagebox.showerror("Error", f"Prerequisite '{prereq}' not met.")
+                    return
+
+            # Check if technology is already purchased
+            if any(t.name == tech_obj.name for t in self.selected_player.technologies):
+                messagebox.showerror("Error", "Technology already purchased.")
+                return
+
+            self.selected_player.ec -= tech_obj.cost
+            self.selected_player.technologies.append(tech_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Purchased tech {tech_obj.name}")
+
+            add_window.destroy()
+            self.refresh_technologies()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{tech_obj.name} purchased successfully.")
+
+        ttk.Button(add_window, text="Purchase", command=purchase_technology).grid(row=2, column=0, columnspan=2, pady=20)
+
+    def remove_technology(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+        selected_item = self.tech_tree.selection()
+        if not selected_item:
+            messagebox.showerror("Error", "No technology selected.")
+            return
+        tech_name = self.tech_tree.item(selected_item, 'values')[0]
+        tech_obj = next((t for t in self.selected_player.technologies if t.name == tech_name), None)
+        if tech_obj:
+            refund = tech_obj.cost // 2  # optional partial refund
+            self.selected_player.ec += refund
+            self.selected_player.technologies.remove(tech_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed tech {tech_obj.name}")
+
+            self.refresh_technologies()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{tech_obj.name} removed. Refunded {refund} EC.")
+
+    # ---------------------- Resource Trading & Selling ----------------------
+
+    def trade_resources_dialog(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+
+        trade_window = tk.Toplevel(self)
+        trade_window.title("Trade Resources")
+        trade_window.geometry("500x300")
+        trade_window.configure(bg="#F0F4F7")
+
+        ttk.Label(trade_window, text="Offer Resource:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        offer_var = tk.StringVar()
+        offer_dropdown = ttk.Combobox(trade_window, textvariable=offer_var, state="readonly")
+        offer_dropdown['values'] = list(self.selected_player.resources.keys())
+        offer_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+
+        ttk.Label(trade_window, text="Offer Quantity:").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+        offer_qty_var = tk.StringVar()
+        offer_qty_entry = ttk.Entry(trade_window, textvariable=offer_qty_var)
+        offer_qty_entry.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
+
+        ttk.Label(trade_window, text="Request Resource:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        request_var = tk.StringVar()
+        request_dropdown = ttk.Combobox(trade_window, textvariable=request_var, state="readonly")
+        request_dropdown['values'] = list(self.selected_player.resources.keys())
+        request_dropdown.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
+
+        ttk.Label(trade_window, text="Request Quantity:").grid(row=3, column=0, padx=10, pady=10, sticky=tk.W)
+        request_qty_var = tk.StringVar()
+        request_qty_entry = ttk.Entry(trade_window, textvariable=request_qty_var)
+        request_qty_entry.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
+
+        def perform_trade():
+            try:
+                off_q = int(offer_qty_var.get())
+                req_q = int(request_qty_var.get())
+            except ValueError:
+                messagebox.showerror("Error", "Quantities must be integers.")
+                return
+            if off_q <= 0 or req_q <= 0:
+                messagebox.showerror("Error", "Quantities must be positive.")
+                return
+
+            off_res = offer_var.get()
+            req_res = request_var.get()
+            if not off_res or not req_res:
+                messagebox.showerror("Error", "Select both offer and request resources.")
+                return
+
+            available_offer = self.selected_player.resources.get(off_res, 0)
+            if available_offer < off_q:
+                messagebox.showerror("Error", f"Not enough {off_res} to offer.")
+                return
+
+            # Basic 1:1 resource swap demonstration
+            self.selected_player.resources[off_res] -= off_q
+            self.selected_player.resources[req_res] += req_q
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(
+                f"Traded away {off_q} {off_res} for {req_q} {req_res}"
+            )
+
+            messagebox.showinfo("Trade", f"Successfully traded {off_q} {off_res} for {req_q} {req_res}.")
+            trade_window.destroy()
+            self.refresh_resources()
+
+        ttk.Button(trade_window, text="Trade", command=perform_trade).grid(row=4, column=0, columnspan=2, pady=20)
+
+    def sell_resources_dialog(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
+
+        sell_window = tk.Toplevel(self)
+        sell_window.title("Sell Resources")
+        sell_window.geometry("400x250")
+        sell_window.configure(bg="#F0F4F7")
+
+        ttk.Label(sell_window, text="Select Resource to Sell:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+        resource_var = tk.StringVar()
+        resource_names = list(self.selected_player.resources.keys())
+        resource_dropdown = ttk.Combobox(sell_window, textvariable=resource_var, state="readonly")
+        resource_dropdown['values'] = resource_names
+        resource_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+
+        ttk.Label(sell_window, text="Quantity to Sell:").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+        quantity_var = tk.StringVar()
+        quantity_entry = ttk.Entry(sell_window, textvariable=quantity_var)
+        quantity_entry.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
+
+        def confirm_sale():
+            res = resource_var.get()
+            try:
+                qty = int(quantity_var.get())
+            except ValueError:
+                messagebox.showerror("Error", "Quantity must be a valid integer.")
+                return
+            if qty <= 0:
+                messagebox.showerror("Error", "Quantity must be positive.")
+                return
+            if self.selected_player.resources.get(res, 0) < qty:
+                messagebox.showerror("Error", f"Not enough {res} to sell.")
+                return
+
+            # Sell price: 50 EC/unit
+            total_sale = qty * 50
+            self.selected_player.resources[res] -= qty
+            self.selected_player.ec += total_sale
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(
+                f"Sold {qty} {res} for {total_sale} EC"
+            )
+
+            messagebox.showinfo("Sale Complete", f"Sold {qty}x {res} for {total_sale} EC.")
+            sell_window.destroy()
+            self.refresh_resources()
+            self.refresh_dashboard()
+
+        ttk.Button(sell_window, text="Sell", command=confirm_sale).grid(row=2, column=0, columnspan=2, pady=20)
 
     # ---------------------- Terrain Management ----------------------
 
@@ -1065,13 +1479,19 @@ class CompanionApp(tk.Tk):
             return
 
         if self.selected_player.ec < terrain.purchase_cost:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to purchase this terrain.")
+            messagebox.showerror("Error", "Not enough EC to purchase this terrain.")
             return
 
         def confirm_purchase():
             try:
                 self.selected_player.ec -= terrain.purchase_cost
                 terrain.owned_by = self.selected_player.name
+
+                # Record action
+                self.player_actions[self.selected_player.name].append(
+                    f"Purchased terrain {terrain_id+1} ({terrain.terrain_type}) for {terrain.purchase_cost} EC"
+                )
+
                 self.refresh_terrain()
                 self.refresh_tabs()
                 messagebox.showinfo("Success", f"Terrain tile {terrain_id + 1} purchased successfully.")
@@ -1107,7 +1527,7 @@ class CompanionApp(tk.Tk):
 
         add_window = tk.Toplevel(self)
         add_window.title("Add Factory")
-        add_window.geometry("600x600")
+        add_window.geometry("700x700")
         add_window.configure(bg="#F0F4F7")
 
         ttk.Label(add_window, text="Select Factory Type:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
@@ -1130,609 +1550,259 @@ class CompanionApp(tk.Tk):
         terrain_dropdown['values'] = owned_tiles
         terrain_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
 
-        ttk.Label(add_window, text="Select Transportation Type for Each Resource Needed:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
+        factory_details = tk.Text(add_window, width=60, height=10, wrap='word', state='disabled')
+        factory_details.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
         transportation_frames = []
 
+        def display_factory_characteristics(f_obj):
+            if not f_obj:
+                return
+            details_str = (
+                f"Name: {f_obj.name}\n"
+                f"Construction Cost: {f_obj.construction_cost}\n"
+                f"Operational Cost: {f_obj.operational_cost}\n"
+                f"Pollution: {f_obj.pollution}\n"
+                f"Output: {', '.join(f'{k}:{v}' for k,v in f_obj.output.items())}\n"
+                f"Resource Requirements: "
+                f"{', '.join(f'{k}:{v}' for k,v in f_obj.resource_requirements.items()) if f_obj.resource_requirements else 'None'}\n"
+                f"Allowed Terrain: {', '.join(f_obj.allowed_terrain)}\n"
+                f"Workers Required: {', '.join(f'{k}:{v}' for k,v in f_obj.workers_required.items())}\n"
+                f"Transportation Needed: "
+                f"{', '.join(f_obj.transportation_needed) if f_obj.transportation_needed else 'None'}\n"
+                f"EC Output: {f_obj.ec_output}\n"
+            )
+            factory_details.config(state='normal')
+            factory_details.delete("1.0", tk.END)
+            factory_details.insert(tk.END, details_str)
+            factory_details.config(state='disabled')
+
         def update_transportation_fields(event):
             factory_type = factory_type_var.get()
-            for frame in transportation_frames:
-                frame.destroy()
+            f_obj = next((f for f in self.factories_list if f.name == factory_type), None)
+
+            # Display factory's characteristics
+            display_factory_characteristics(f_obj)
+
+            for trans_dropdown in transportation_frames:
+                trans_dropdown.destroy()
             transportation_frames.clear()
-            factory = next((f for f in self.factories_list if f.name == factory_type), None)
-            if factory and factory.transportation_needed:
-                for idx, res in enumerate(factory.transportation_needed):
-                    ttk.Label(add_window, text=f"{res}:").grid(row=3 + idx * 2, column=0, padx=20, pady=5, sticky=tk.W)
+            if f_obj and f_obj.transportation_needed:
+                row_start = 4
+                for idx, res in enumerate(f_obj.transportation_needed):
+                    lbl = ttk.Label(add_window, text=f"{res}:")
+                    lbl.grid(row=row_start + idx, column=0, padx=20, pady=5, sticky=tk.W)
                     trans_var = tk.StringVar()
                     trans_dropdown = ttk.Combobox(add_window, textvariable=trans_var, state="readonly")
                     trans_dropdown['values'] = [t['type'] for t in self.transportation_types]
                     trans_dropdown.current(0)
-                    trans_dropdown.grid(row=3 + idx * 2, column=1, padx=10, pady=5, sticky=tk.W)
+                    trans_dropdown.grid(row=row_start + idx, column=1, padx=10, pady=5, sticky=tk.W)
                     transportation_frames.append(trans_dropdown)
 
         factory_dropdown.bind("<<ComboboxSelected>>", update_transportation_fields)
+        update_transportation_fields(None)
 
-        ttk.Button(
-            add_window,
-            text="Add Factory",
-            command=lambda: self.add_factory(factory_type_var.get(), terrain_var.get(), transportation_frames, add_window)
-        ).grid(row=100, column=0, columnspan=2, pady=20)
+        def add_factory():
+            fac_name = factory_type_var.get()
+            terrain_selection = terrain_var.get()
+            if not fac_name or not terrain_selection or terrain_selection == "No owned terrain tiles available.":
+                messagebox.showerror("Error", "Please select both a factory type and a valid terrain.")
+                return
+            f_obj = next((f for f in self.factories_list if f.name == fac_name), None)
+            if not f_obj:
+                messagebox.showerror("Error", "Invalid factory type selected.")
+                return
 
-    def add_factory(self, factory_name: str, terrain_selection: str, transportation_frames: List[ttk.Combobox], window):
-        if not factory_name or not terrain_selection or terrain_selection == "No owned terrain tiles available.":
-            messagebox.showerror("Error", "Please select both factory type and a valid terrain.")
-            return
-        factory = next((f for f in self.factories_list if f.name == factory_name), None)
-        if not factory:
-            messagebox.showerror("Error", "Invalid factory type selected.")
-            return
-        # Check if terrain allows the factory
-        terrain_id = int(terrain_selection.split('.')[0]) - 1
-        terrain = self.game_state.terrain_tiles[terrain_id]
-        if terrain.terrain_type not in factory.allowed_terrain:
-            messagebox.showerror("Error", f"{factory.name} cannot be placed on {terrain.terrain_type} terrain.")
-            return
-        # Check if player can afford
-        if self.selected_player.ec < factory.construction_cost:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to construct this factory.")
-            return
-        # Deduct cost
-        self.selected_player.ec -= factory.construction_cost
-        # Create a copy of factory data
-        new_factory = Factory(
-            name=factory.name,
-            construction_cost=factory.construction_cost,
-            operational_cost=factory.operational_cost,
-            pollution=factory.pollution,
-            output=factory.output.copy(),
-            resource_requirements=factory.resource_requirements.copy(),
-            allowed_terrain=factory.allowed_terrain.copy(),
-            workers_required=factory.workers_required.copy(),
-            transportation_needed=factory.transportation_needed.copy()
-        )
-        # Assign transportation details
-        if factory.transportation_needed:
-            for idx, res in enumerate(factory.transportation_needed):
-                trans_type = transportation_frames[idx].get()
-                # Find nearest terrain tile with the resource
-                distance, source_tile_index = self.find_nearest_resource(terrain_id, res)
-                if source_tile_index is None:
-                    # Prompt user to purchase a terrain tile that provides the missing resource
-                    proceed = messagebox.askyesno(
-                        "Resource Missing",
-                        f"You do not own any terrain tile with the required resource: {res}.\n"
-                        f"Do you want to purchase a terrain tile that provides {res}?"
-                    )
-                    if proceed:
-                        # Open terrain purchase dialog filtered by resource
-                        available_terrain = [
-                            f"{i + 1}. {tile.terrain_type}"
-                            for i, tile in enumerate(self.game_state.terrain_tiles)
-                            if tile.owned_by is None and res in tile.resources
-                        ]
-                        if not available_terrain:
-                            messagebox.showerror(
-                                "Error",
-                                f"No available terrain tiles provide the required resource: {res}."
-                            )
-                            # Refund factory construction cost
-                            self.selected_player.ec += new_factory.construction_cost
-                            return
-                        purchase_window = tk.Toplevel(self)
-                        purchase_window.title(f"Purchase Terrain for {res}")
-                        purchase_window.geometry("500x300")
-                        purchase_window.configure(bg="#F0F4F7")
+            try:
+                tid = int(terrain_selection.split('.')[0]) - 1
+            except (IndexError, ValueError):
+                messagebox.showerror("Error", "Invalid terrain selection.")
+                return
+            terrain_tile = self.game_state.terrain_tiles[tid]
+            if terrain_tile.terrain_type not in f_obj.allowed_terrain:
+                messagebox.showerror("Error", f"{f_obj.name} cannot be placed on {terrain_tile.terrain_type} terrain.")
+                return
+            if self.selected_player.ec < f_obj.construction_cost:
+                messagebox.showerror("Error", "Not enough EC to construct this factory.")
+                return
 
-                        ttk.Label(purchase_window, text=f"Select Terrain Tile that provides {res}:").pack(padx=10, pady=10)
-                        terrain_var = tk.StringVar()
-                        terrain_dropdown = ttk.Combobox(purchase_window, textvariable=terrain_var, state="readonly")
-                        terrain_dropdown['values'] = available_terrain
-                        terrain_dropdown.pack(padx=10, pady=10)
+            # Check resource requirements
+            missing_resources = {}
+            for r, q in f_obj.resource_requirements.items():
+                if self.selected_player.resources.get(r, 0) < q:
+                    missing_resources[r] = q - self.selected_player.resources.get(r, 0)
 
-                        def confirm_purchase():
-                            selected_terrain = terrain_dropdown.get()
-                            if not selected_terrain:
-                                messagebox.showerror("Error", "Please select a terrain tile.")
-                                return
-                            selected_id = int(selected_terrain.split('.')[0]) - 1
-                            terrain_tile = self.game_state.terrain_tiles[selected_id]
-                            if self.selected_player.ec < terrain_tile.purchase_cost:
-                                messagebox.showerror("Error", "Insufficient Eco-Credits to purchase this terrain.")
-                                return
-                            self.selected_player.ec -= terrain_tile.purchase_cost
-                            terrain_tile.owned_by = self.selected_player.name
-                            self.refresh_terrain()
-                            purchase_window.destroy()
-                            # After purchasing, re-attempt to find the resource
-                            distance_new, source_tile_index_new = self.find_nearest_resource(terrain_id, res)
-                            if source_tile_index_new is not None:
-                                new_factory.transportation[res] = {"type": trans_type, "distance": distance_new}
-                                self.refresh_tabs()
-                            else:
-                                messagebox.showerror("Error", f"Failed to acquire the required resource: {res}.")
-                                # Refund factory construction cost
-                                self.selected_player.ec += new_factory.construction_cost
-                                return
+            if missing_resources:
+                if not self.buy_resources_from_bank(missing_resources):
+                    messagebox.showerror("Error", "Cannot proceed without required resources.")
+                    return
 
-                        ttk.Button(purchase_window, text="Purchase", command=confirm_purchase).pack(pady=10)
-                        ttk.Button(purchase_window, text="Cancel", command=purchase_window.destroy).pack()
-                        self.wait_window(purchase_window)
-                        # After purchase, check if resource is now available
-                        distance_new, source_tile_index_new = self.find_nearest_resource(terrain_id, res)
-                        if source_tile_index_new is not None:
-                            new_factory.transportation[res] = {"type": trans_type, "distance": distance_new}
-                        else:
-                            messagebox.showerror("Error", f"Resource {res} still not available.")
-                            # Refund factory construction cost
-                            self.selected_player.ec += new_factory.construction_cost
-                            return
-                    else:
-                        messagebox.showerror("Error", f"Cannot add factory without required resource: {res}.")
-                        # Refund factory construction cost
+            # Deduct resources
+            for r, q in f_obj.resource_requirements.items():
+                self.selected_player.resources[r] -= q
+
+            # Deduct EC for construction
+            self.selected_player.ec -= f_obj.construction_cost
+
+            # Create a copy of the factory
+            new_factory = Factory(
+                name=f_obj.name,
+                construction_cost=f_obj.construction_cost,
+                operational_cost=f_obj.operational_cost,
+                pollution=f_obj.pollution,
+                output=f_obj.output.copy(),
+                resource_requirements=f_obj.resource_requirements.copy(),
+                allowed_terrain=f_obj.allowed_terrain.copy(),
+                workers_required=f_obj.workers_required.copy(),
+                transportation_needed=f_obj.transportation_needed.copy(),
+                ec_output=f_obj.ec_output
+            )
+
+            # Assign transportation
+            if f_obj.transportation_needed:
+                for idx, r in enumerate(f_obj.transportation_needed):
+                    trans_type = transportation_frames[idx].get()
+                    dist, tile_idx = self.find_nearest_resource(tid, r)
+                    if tile_idx is None:
+                        messagebox.showerror("Error", f"No owned terrain provides {r}.")
+                        # Refund
                         self.selected_player.ec += new_factory.construction_cost
+                        for rr, qq in f_obj.resource_requirements.items():
+                            self.selected_player.resources[rr] += qq
                         return
-                else:
-                    new_factory.transportation[res] = {"type": trans_type, "distance": distance}
+                    new_factory.transportation[r] = {"type": trans_type, "distance": dist}
 
-        # Assign workers based on requirements
-        for role, count in new_factory.workers_required.items():
-            available_workers = [w for w in self.selected_player.workers if w.role == role]
-            if len(available_workers) < count:
-                messagebox.showwarning("Warning", f"Not enough {role}s to assign to this factory.")
-            for i in range(min(count, len(available_workers))):
-                worker = available_workers[i]
-                new_factory.workers_assigned[role] = new_factory.workers_assigned.get(role, 0) + 1
+            # Worker requirement warning
+            for role, count_needed in new_factory.workers_required.items():
+                available_workers = [w for w in self.selected_player.workers if w.role == role]
+                if len(available_workers) < count_needed:
+                    messagebox.showwarning(
+                        "Warning",
+                        f"Not enough {role}(s) for {new_factory.name} "
+                        f"(need {count_needed}, have {len(available_workers)})."
+                    )
 
-        # Add the factory to player's list
-        self.selected_player.factories.append(new_factory)
-        self.refresh_factories()
-        window.destroy()
-        messagebox.showinfo("Success", f"{new_factory.name} added successfully.")
+            # Attempt to auto-assign as many as possible
+            for role, count_needed in new_factory.workers_required.items():
+                assigned = 0
+                available_workers = [w for w in self.selected_player.workers if w.role == role]
+                while assigned < count_needed and available_workers:
+                    worker_obj = available_workers.pop()
+                    new_factory.workers_assigned[role] = new_factory.workers_assigned.get(role, 0) + 1
+                    assigned += 1
 
-    def find_nearest_resource(self, factory_terrain_index: int, resource: str) -> tuple[int, Optional[int]]:
-        min_distance = float('inf')
-        source_tile_index = None
+            self.selected_player.factories.append(new_factory)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Constructed factory {new_factory.name}")
+
+            add_window.destroy()
+            self.refresh_factories()
+            self.refresh_resources()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{new_factory.name} added successfully.")
+
+        ttk.Button(add_window, text="Add Factory", command=add_factory).grid(row=50, column=0, columnspan=2, pady=20)
+
+    def find_nearest_resource(self, factory_terrain_index: int, resource: str) -> {int, Optional[int]}:
+        min_dist = float('inf')
+        found_index = None
         for i, tile in enumerate(self.game_state.terrain_tiles):
-            if tile.owned_by != self.selected_player.name:
-                continue
-            if resource in tile.resources:
-                distance = self.calculate_distance(factory_terrain_index, i)
-                if distance < min_distance:
-                    min_distance = distance
-                    source_tile_index = i
-        return min_distance, source_tile_index
+            if tile.owned_by == self.selected_player.name and resource in tile.resources:
+                d = self.calculate_distance(factory_terrain_index, i)
+                if d < min_dist:
+                    min_dist = d
+                    found_index = i
+        if found_index is None:
+            return 0, None
+        return min_dist, found_index
 
     def calculate_distance(self, index1: int, index2: int) -> int:
-        # Assuming 4x5 grid, index from 0 to 19
         row1, col1 = divmod(index1, 5)
         row2, col2 = divmod(index2, 5)
         return abs(row1 - row2) + abs(col1 - col2)
 
     def remove_factory(self):
+        if not self.selected_player:
+            messagebox.showerror("Error", "No player selected.")
+            return
         selected_item = self.factory_tree.selection()
         if not selected_item:
             messagebox.showerror("Error", "No factory selected.")
             return
         factory_name = self.factory_tree.item(selected_item, 'values')[0]
-        factory = next((f for f in self.selected_player.factories if f.name == factory_name), None)
-        if factory:
-            # Refund construction cost
-            self.selected_player.ec += factory.construction_cost
-            # Remove factory
-            self.selected_player.factories.remove(factory)
-            self.factory_tree.delete(selected_item)
+        factory_obj = next((f for f in self.selected_player.factories if f.name == factory_name), None)
+        if factory_obj:
+            # Optional partial refund
+            self.selected_player.ec += factory_obj.construction_cost
+            for res, qty in factory_obj.output.items():
+                if res != "Consultancy Services":
+                    self.selected_player.resources[res] += qty
+            self.selected_player.factories.remove(factory_obj)
+
+            # Record action
+            self.player_actions[self.selected_player.name].append(f"Removed factory {factory_obj.name}")
+
             self.refresh_factories()
-            messagebox.showinfo("Success", f"{factory.name} removed successfully.")
+            self.refresh_resources()
+            self.refresh_dashboard()
+            messagebox.showinfo("Success", f"{factory_obj.name} removed successfully.")
 
-    # ---------------------- Technology Management ----------------------
+    def buy_resources_from_bank(self, required_resources: Dict[str, int]) -> bool:
+        total_cost = 0
+        resource_costs = {}
+        for res, qty in required_resources.items():
+            cost_per_unit = 100  # double base price
+            cost = cost_per_unit * qty
+            resource_costs[res] = cost
+            total_cost += cost
 
-    def purchase_technology_dialog(self):
-        if not self.selected_player:
-            messagebox.showerror("Error", "No player selected.")
-            return
+        msg = "You need to buy these resources from the bank:\n\n"
+        for res, cost in resource_costs.items():
+            msg += f"{res}: {cost // 100} units => {cost} EC total\n"
+        msg += f"\nTotal Cost: {total_cost} EC\nProceed?"
 
-        add_window = tk.Toplevel(self)
-        add_window.title("Purchase Technology")
-        add_window.geometry("600x400")
-        add_window.configure(bg="#F0F4F7")
+        if not messagebox.askyesno("Buy Resources", msg):
+            return False
 
-        ttk.Label(add_window, text="Select Technology:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        tech_type_var = tk.StringVar()
-        tech_names = [tech.name for tech in self.technologies_list]
-        tech_dropdown = ttk.Combobox(add_window, textvariable=tech_type_var, state="readonly")
-        tech_dropdown['values'] = tech_names
-        tech_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
+        if self.selected_player.ec < total_cost:
+            messagebox.showerror("Error", "Not enough EC to buy required resources.")
+            return False
 
-        # Display selected technology details
-        tech_details = tk.Text(add_window, width=60, height=15, wrap='word')
-        tech_details.grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+        self.selected_player.ec -= total_cost
+        for r, cost in resource_costs.items():
+            qty_purchased = cost // 100
+            self.selected_player.resources[r] += qty_purchased
 
-        def display_tech_details(event):
-            selected_tech_name = tech_type_var.get()
-            tech = next((t for t in self.technologies_list if t.name == selected_tech_name), None)
-            if tech:
-                details = (
-                    f"Name: {tech.name}\n"
-                    f"Category: {tech.category}\n"
-                    f"Cost: {tech.cost} EC\n"
-                    f"Maintenance: {tech.maintenance} EC/round\n"
-                    f"Effect: {tech.effect}\n"
-                    f"Prerequisites: {', '.join(tech.prerequisites) if tech.prerequisites else 'None'}"
-                )
-                tech_details.delete(1.0, tk.END)
-                tech_details.insert(tk.END, details)
+        # Record action
+        for rr, cc in resource_costs.items():
+            q_p = cc // 100
+            self.player_actions[self.selected_player.name].append(f"Bought {q_p} {rr} from bank")
 
-        tech_dropdown.bind("<<ComboboxSelected>>", display_tech_details)
-
-        ttk.Button(
-            add_window,
-            text="Purchase",
-            command=lambda: self.purchase_technology(tech_type_var.get(), add_window)
-        ).grid(row=2, column=0, columnspan=2, pady=20)
-
-    def purchase_technology(self, tech_name: str, window):
-        if not tech_name:
-            messagebox.showerror("Error", "Please select a technology.")
-            return
-        tech = next((t for t in self.technologies_list if t.name == tech_name), None)
-        if not tech:
-            messagebox.showerror("Error", "Invalid technology selected.")
-            return
-        # Check if player can afford
-        if self.selected_player.ec < tech.cost:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to purchase this technology.")
-            return
-        # Check prerequisites
-        for prereq in tech.prerequisites:
-            if prereq not in [t.name for t in self.selected_player.technologies]:
-                messagebox.showerror("Error", f"Prerequisite '{prereq}' not met.")
-                return
-        # Deduct cost
-        self.selected_player.ec -= tech.cost
-        # Add technology
-        self.selected_player.technologies.append(tech)
-        self.refresh_technologies()
-        window.destroy()
-        messagebox.showinfo("Success", f"{tech.name} purchased successfully.")
-
-    def remove_technology(self):
-        selected_item = self.tech_tree.selection()
-        if not selected_item:
-            messagebox.showerror("Error", "No technology selected.")
-            return
-        tech_name = self.tech_tree.item(selected_item, 'values')[0]
-        tech = next((t for t in self.selected_player.technologies if t.name == tech_name), None)
-        if tech:
-            # Refund half the cost (optional)
-            refund = tech.cost // 2
-            self.selected_player.ec += refund
-            # Remove technology
-            self.selected_player.technologies.remove(tech)
-            self.tech_tree.delete(selected_item)
-            self.refresh_technologies()
-            messagebox.showinfo("Success", f"{tech.name} removed successfully. Refunded {refund} EC.")
-
-    # ---------------------- Worker Management ----------------------
-
-    def hire_worker_dialog(self):
-        if not self.selected_player:
-            messagebox.showerror("Error", "No player selected.")
-            return
-
-        add_window = tk.Toplevel(self)
-        add_window.title("Hire Worker")
-        add_window.geometry("400x300")
-        add_window.configure(bg="#F0F4F7")
-
-        ttk.Label(add_window, text="Select Worker Role:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        worker_role_var = tk.StringVar()
-        worker_roles = ["Engineer", "Technician", "Environmental Advisor", "Universal Worker"]
-        worker_dropdown = ttk.Combobox(add_window, textvariable=worker_role_var, state="readonly")
-        worker_dropdown['values'] = worker_roles
-        worker_dropdown.current(0)
-        worker_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
-
-        # Display worker details
-        worker_details = tk.Text(add_window, width=40, height=5, wrap='word')
-        worker_details.grid(row=1, column=0, columnspan=2, padx=10, pady=5)
-
-        def display_worker_details(event):
-            selected_role = worker_role_var.get()
-            worker_info = {
-                "Engineer": {"salary": 50, "benefit": "+20% production in advanced factories, or +10% in basic factories."},
-                "Technician": {"salary": 30, "benefit": "Maintains baseline production. Required for certain factories."},
-                "Environmental Advisor": {"salary": 40, "benefit": "-3 pollution in the factory they’re assigned to."},
-                "Universal Worker": {"salary": 20, "benefit": "Minimal production help; no special pollution or efficiency bonuses."}
-            }
-            if selected_role in worker_info:
-                details = (
-                    f"Role: {selected_role}\n"
-                    f"Salary: {worker_info[selected_role]['salary']} EC/round\n"
-                    f"Benefit: {worker_info[selected_role]['benefit']}"
-                )
-                worker_details.delete(1.0, tk.END)
-                worker_details.insert(tk.END, details)
-
-        worker_dropdown.bind("<<ComboboxSelected>>", display_worker_details)
-
-        ttk.Button(
-            add_window,
-            text="Hire",
-            command=lambda: self.hire_worker(worker_role_var.get(), add_window)
-        ).grid(row=2, column=0, columnspan=2, pady=20)
-
-    def hire_worker(self, role: str, window):
-        worker_info = {
-            "Engineer": {"salary": 50, "benefit": "+20% production in advanced factories, or +10% in basic factories."},
-            "Technician": {"salary": 30, "benefit": "Maintains baseline production. Required for certain factories."},
-            "Environmental Advisor": {"salary": 40, "benefit": "-3 pollution in the factory they’re assigned to."},
-            "Universal Worker": {"salary": 20, "benefit": "Minimal production help; no special pollution or efficiency bonuses."}
-        }
-        if role not in worker_info:
-            messagebox.showerror("Error", "Invalid worker role selected.")
-            return
-        worker = Worker(
-            role=role,
-            salary=worker_info[role]["salary"],
-            benefit=worker_info[role]["benefit"]
-        )
-        # Check if player can afford
-        if self.selected_player.ec < worker.salary:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to hire this worker.")
-            return
-        # Deduct salary
-        self.selected_player.ec -= worker.salary
-        self.selected_player.workers.append(worker)
-        self.worker_tree.insert("", tk.END, values=(worker.role, worker.salary, worker.benefit))
-        window.destroy()
-        messagebox.showinfo("Success", f"{role} hired successfully.")
-
-    def assign_worker_dialog_fixed(self):
-        if not self.selected_player:
-            messagebox.showerror("Error", "No player selected.")
-            return
-        if not self.selected_player.workers:
-            messagebox.showerror("Error", "No workers available to assign.")
-            return
-        if not self.selected_player.factories:
-            messagebox.showerror("Error", "No factories available to assign workers.")
-            return
-
-        assign_window = tk.Toplevel(self)
-        assign_window.title("Assign Worker")
-        assign_window.geometry("500x300")
-        assign_window.configure(bg="#F0F4F7")
-
-        ttk.Label(assign_window, text="Select Worker:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        worker_var = tk.StringVar()
-        workers = [f"{w.role} #{i + 1}" for i, w in enumerate(self.selected_player.workers)]
-        worker_dropdown = ttk.Combobox(assign_window, textvariable=worker_var, state="readonly")
-        worker_dropdown['values'] = workers
-        worker_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Label(assign_window, text="Select Factory:").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
-        factory_var = tk.StringVar()
-        factories = [factory.name for factory in self.selected_player.factories]
-        factory_dropdown = ttk.Combobox(assign_window, textvariable=factory_var, state="readonly")
-        factory_dropdown['values'] = factories
-        factory_dropdown.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Button(
-            assign_window,
-            text="Assign",
-            command=lambda: self.assign_worker(worker_var.get(), factory_var.get(), assign_window)
-        ).grid(row=2, column=0, columnspan=2, pady=20)
-
-    # Replace the original assign_worker_dialog with the fixed one
-    assign_worker_dialog = assign_worker_dialog_fixed
-
-    def assign_worker_fixed(self, worker_selection: str, factory_name: str, window):
-        if not worker_selection or not factory_name:
-            messagebox.showerror("Error", "Please select both worker and factory.")
-            return
-        # Extract worker index
-        try:
-            worker_index = int(worker_selection.split('#')[1]) - 1
-            worker = self.selected_player.workers[worker_index]
-        except (IndexError, ValueError):
-            messagebox.showerror("Error", "Invalid worker selection.")
-            return
-        factory = next((f for f in self.selected_player.factories if f.name == factory_name), None)
-        if not factory:
-            messagebox.showerror("Error", "Invalid factory selected.")
-            return
-        # Normalize worker.role to ensure no leading/trailing spaces and correct casing
-        worker_role = worker.role.strip()
-        # Check if factory requires this worker role
-        if worker_role not in factory.workers_required:
-            messagebox.showerror("Error", f"{worker_role} is not required for {factory.name}.")
-            return
-        required = factory.workers_required.get(worker_role, 0)
-        assigned = factory.workers_assigned.get(worker_role, 0)
-        if assigned >= required:
-            messagebox.showerror("Error", f"No need for more {worker_role}s in {factory.name}.")
-            return
-        # Assign worker
-        factory.workers_assigned[worker_role] = assigned + 1
-        self.refresh_factories()
-        window.destroy()
-        messagebox.showinfo("Success", f"{worker_role} assigned to {factory.name}.")
-
-    # Replace the original assign_worker method with the fixed one
-    assign_worker = assign_worker_fixed
-
-    def remove_worker(self):
-        selected_item = self.worker_tree.selection()
-        if not selected_item:
-            messagebox.showerror("Error", "No worker selected.")
-            return
-        worker_role = self.worker_tree.item(selected_item, 'values')[0]
-        # Find the first worker with the selected role
-        worker = next((w for w in self.selected_player.workers if w.role == worker_role), None)
-        if worker:
-            # Remove worker from any factories
-            for factory in self.selected_player.factories:
-                if worker.role in factory.workers_assigned:
-                    if factory.workers_assigned[worker.role] > 0:
-                        factory.workers_assigned[worker.role] -= 1
-                        if factory.workers_assigned[worker.role] == 0:
-                            del factory.workers_assigned[worker.role]
-            # Remove worker
-            self.selected_player.workers.remove(worker)
-            self.worker_tree.delete(selected_item)
-            self.refresh_factories()
-            messagebox.showinfo("Success", f"{worker.role} removed successfully.")
-
-    # ---------------------- Resource Management ----------------------
-
-    def trade_resources_dialog(self):
-        if not self.selected_player:
-            messagebox.showerror("Error", "No player selected.")
-            return
-
-        trade_window = tk.Toplevel(self)
-        trade_window.title("Trade Resources")
-        trade_window.geometry("500x300")
-        trade_window.configure(bg="#F0F4F7")
-
-        ttk.Label(trade_window, text="Offer Resource:").grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
-        offer_var = tk.StringVar()
-        offer_dropdown = ttk.Combobox(trade_window, textvariable=offer_var, state="readonly")
-        offer_dropdown['values'] = [
-            "Minerals", "Wood", "Oil", "Water", "Plastics",
-            "Bioplastics", "Solar Panel", "Wind Turbine", "Recycled Materials",
-            "Manufactured Goods", "Fish", "Consultancy Services"
-        ]
-        offer_dropdown.grid(row=0, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Label(trade_window, text="Offer Quantity:").grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
-        offer_qty_var = tk.StringVar()
-        offer_qty_entry = ttk.Entry(trade_window, textvariable=offer_qty_var)
-        offer_qty_entry.grid(row=1, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Label(trade_window, text="Request Resource:").grid(row=2, column=0, padx=10, pady=10, sticky=tk.W)
-        request_var = tk.StringVar()
-        request_dropdown = ttk.Combobox(trade_window, textvariable=request_var, state="readonly")
-        request_dropdown['values'] = [
-            "Minerals", "Wood", "Oil", "Water", "Plastics",
-            "Bioplastics", "Solar Panel", "Wind Turbine", "Recycled Materials",
-            "Manufactured Goods", "Fish", "Consultancy Services"
-        ]
-        request_dropdown.grid(row=2, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Label(trade_window, text="Request Quantity:").grid(row=3, column=0, padx=10, pady=10, sticky=tk.W)
-        request_qty_var = tk.StringVar()
-        request_qty_entry = ttk.Entry(trade_window, textvariable=request_qty_var)
-        request_qty_entry.grid(row=3, column=1, padx=10, pady=10, sticky=tk.W)
-
-        ttk.Button(
-            trade_window,
-            text="Trade",
-            command=lambda: self.perform_trade(offer_var.get(), offer_qty_var.get(), request_var.get(), request_qty_var.get(), trade_window)
-        ).grid(row=4, column=0, columnspan=2, pady=20)
-
-    def perform_trade(self, offer_res: str, offer_qty: str, request_res: str, request_qty: str, window):
-        try:
-            offer_qty = int(offer_qty)
-            request_qty = int(request_qty)
-        except ValueError:
-            messagebox.showerror("Error", "Quantities must be integers.")
-            return
-        if offer_qty <= 0 or request_qty <= 0:
-            messagebox.showerror("Error", "Quantities must be positive.")
-            return
-        # Check if player has enough offer resource
-        produced = self.get_produced_resource(offer_res)
-        if produced < offer_qty:
-            messagebox.showerror("Error", f"Not enough {offer_res} to offer.")
-            return
-        # Assume base price: 50 EC per unit
-        offer_value = offer_qty * 50
-        request_value = request_qty * 50
-        # Check if player can afford the trade
-        if self.selected_player.ec < request_value:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to fulfill the trade.")
-            return
-        # Execute trade
-        self.selected_player.ec += offer_value
-        self.selected_player.ec -= request_value
+        self.refresh_dashboard()
         self.refresh_resources()
-        window.destroy()
-        messagebox.showinfo("Trade", "Trade executed successfully.")
+        return True
 
-    def get_produced_resource(self, resource: str) -> int:
-        produced = 0
-        for factory in self.selected_player.factories:
-            if resource in factory.output:
-                produced += factory.output[resource]
-        return produced
-
-    # ---------------------- Overridden calculate_round for Pollution & Costs ----------------------
-
-    def calculate_round_original(self):
-        if not self.selected_player:
-            messagebox.showerror("Error", "No player selected.")
-            return
-        # Calculate total pollution and apply carbon tax
-        total_pollution = self.calculate_total_pollution()
-        carbon_tax = 5 * total_pollution
-
-        # Calculate total salaries and maintenance
-        total_salary = sum(worker.salary for worker in self.selected_player.workers)
-        total_maintenance = sum(tech.maintenance for tech in self.selected_player.technologies)
-
-        # Calculate transportation costs
-        transportation_cost = 0
-        for factory in self.selected_player.factories:
-            for trans in factory.transportation.values():
-                trans_type = trans['type']
-                distance = trans['distance']
-                transport_info = next((t for t in self.transportation_types if t['type'] == trans_type), None)
-                if transport_info:
-                    cost = transport_info['cost_per_distance'] * distance
-                    # Check for technology effects that reduce transportation costs
-                    for tech in self.selected_player.technologies:
-                        if "Reduce Fossil Fuel transportation costs by 10 EC per distance unit." in tech.effect and trans_type == "Fossil Fuel":
-                            cost = max(cost - 10 * distance, 0)
-                    transportation_cost += cost
-
-        # Total expenses
-        total_expenses = carbon_tax + total_salary + total_maintenance + transportation_cost
-
-        # Deduct expenses from EC
-        if self.selected_player.ec < total_expenses:
-            messagebox.showerror("Error", "Insufficient Eco-Credits to cover the expenses this round.")
-            return
-        self.selected_player.ec -= total_expenses
-        self.selected_player.pp = total_pollution  # Update Pollution Points
-
-        # Optionally, add production revenue
-        production_revenue = 0
-        for factory in self.selected_player.factories:
-            for res, qty in factory.output.items():
-                if res == "Consultancy Services":
-                    production_revenue += qty
-                else:
-                    production_revenue += qty * 50
-        self.selected_player.ec += production_revenue
-
-        # Update dashboard and other tabs
-        self.refresh_tabs()
-        messagebox.showinfo("Round Calculated", f"Round {self.game_state.current_round} completed.\n"
-                                               f"Expenses: {total_expenses} EC\n"
-                                               f"Revenue: {production_revenue} EC\n"
-                                               f"Net Change: {production_revenue - total_expenses} EC")
-        self.game_state.current_round += 1
-        if self.game_state.current_round > self.game_state.max_rounds:
-            self.end_game()
-
-    # The original calculate_round method is replaced by the fixed version above.
+    # ---------------------- End Game ----------------------
+    def end_game(self):
+        scores = []
+        for player in self.game_state.players:
+            score = player.ec / (1 + player.pp)
+            scores.append((player.name, score))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        winner = scores[0]
+        msg = "Game Over.\n\nFinal Scores:\n"
+        for name, sc in scores:
+            msg += f"{name}: {sc:.2f}\n"
+        msg += f"\nWinner: {winner[0]} with a score of {winner[1]:.2f}!"
+        messagebox.showinfo("Game Over", msg)
+        self.destroy()
 
 # ---------------------- Main Execution ----------------------
 
 def main():
     game_state = GameState()
-    # Uncomment below lines to add example players for demonstration
+    # Optionally add test players
     # game_state.add_player("Player 1")
     # game_state.add_player("Player 2")
 
